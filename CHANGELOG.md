@@ -27,3 +27,17 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 - The generated exception filter put `req.path` — the raw request target — into the error response body, leaking any query string (and anything sensitive in it) back to the caller. It now uses `req.path_only()`.
 - `armature dev -- <args>` no longer mangles the extra cargo arguments when `cargo-watch` is installed; they are folded into the `-x run ...` command string as the built-in watcher branch already did.
 - Removed the dangling `mod watcher;` declaration left behind when the unused, substring-matching `watcher` module was deleted.
+
+## [0.5.1] - 2026-08-04
+
+### Fixed
+
+- Requirements on sibling armature crates name a minor instead of `0`. Under
+  Cargo's 0.x rules `version = "0"` matches any release ever made, and edition
+  2024 selects the MSRV-aware resolver, so a consumer declaring an older
+  `rust-version` was handed the oldest version satisfying it — resolving
+  `armature-core = "0"` on Rust 1.89 produced `armature-core 0.2.3` while an
+  explicit `armature-core = "0.8"` elsewhere in the same graph pulled 0.8.2.
+  Two copies of core, and a build failing on symbols the older one lacks. Each
+  0.x minor in this family is a breaking change, so the requirement now names
+  one. No API change.
