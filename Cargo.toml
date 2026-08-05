@@ -1,6 +1,6 @@
 [package]
 name = "armature-cli"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.94.1"
 authors = ["Joseph Quinn <quinn.josephr@proton.me>"]
@@ -47,10 +47,10 @@ openapiv3 = "2.2"
 reqwest = { version = "0.13", features = ["json"], default-features = false }
 
 # Mock server (uses armature-core)
-armature-core = { version = "0.8" }
+armature-core = { version = "0.9" }
 
 # Rhai application runner
-armature-app = { version = "0.3" }
+armature-app = { version = "0.4" }
 
 [dev-dependencies]
 cargo-husky = { version = "1.5", default-features = false, features = ["user-hooks"] }
