@@ -9,21 +9,41 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-15
+
+### Changed
+
+- **Breaking:** requires `armature-app` 0.5 (was `0.4`); its types appear in this crate's API, so the requirement change is breaking here and the minor moves. Part of the `armature-core` 0.10 release train.
+- **Breaking:** requires `armature-core` 0.10 (was `0.9`); its types appear in this crate's API, so the requirement change is breaking here and the minor moves. Part of the `armature-core` 0.10 release train.
+
+### Security
+
+- Require `webbrowser` 1.2.4 or later, which fixes RUSTSEC-2026-0257 (browser argument injection through the Unix `BROWSER` variable).
+
+## [0.6.0] - 2026-08-05
+
+### Changed
+
+- **Requires `armature-core` 0.9 (breaking).** The requirement moved `0.8` →
+  `0.9`. `armature-core 0.9.0` itself moves `armature-h1` across a breaking
+  0.x boundary; because `armature-core` types appear in this crate's own
+  public API, the requirement change is breaking here too and the minor moves
+  with it. Under Cargo's 0.x caret rules the 0.8 and 0.9 types are distinct
+  and do not unify, so a consumer holding an `armature-core 0.8` type cannot
+  pass it to this crate. Part of the `armature-core 0.9.0` release train; see
+  `armature-core`'s CHANGELOG for the publish order.
+- Requires `armature-app` 0.4 (was `0.3`); it moved its minor in the same train for the same reason.
+
+## [0.5.1] - 2026-08-04
+
 ### Fixed
 
-- **Breaking:** unimplemented subcommands exit non-zero and are hidden. `armature deploy` reported success having deployed nothing, and `armature serve` as a container start-command exited cleanly with no server.
-- Generated scaffolds compile against the current API; the pipe, exception-filter and ten test templates targeted removed types, and no non-ignored test compiled generated output.
-- `armature dev -- <args>` passes arguments through to `cargo run` instead of emitting a `--` before each one and dropping them, which also made behaviour depend on whether `cargo-watch` happened to be installed.
-
-### Changed — `0.4.0` → `0.4.1`
-
-- Migrated onto `armature-core` `0.8`'s `Bytes`-backed request and response types. No behavior change beyond what that migration implies; see [`armature-core/CHANGELOG.md`](../armature-core/CHANGELOG.md).
-- Generated project templates use the new `HttpRequest::new` signature.
-- **Breaking (scripts):** subcommands that were declared but never implemented now exit non-zero instead of printing "coming soon!" and exiting `0`. This affects `serve`, `deploy`, `upgrade`, `bench`, `lint`, `config show|set|init`, `plugin install|uninstall|new`, and `openapi validate|generate`. They are also hidden from `--help` until they do something, and are no longer listed in the crate-level docs. `armature serve` used as a container start-command and `armature deploy` in CI previously reported success having done nothing.
-- Generated code templates no longer emit source that fails to compile against `armature-core`: `req.body = <Vec<u8>>` became `req.set_body(...)` (the body is `Bytes`), `req.params.get(...)`/`req.params.insert(...)` became `req.param(...)`/`req.push_param(...)`, and `HttpRequest::default()` (no such impl) became `HttpRequest::new(method, path)`.
-
-### Fixed
-
-- The generated exception filter put `req.path` — the raw request target — into the error response body, leaking any query string (and anything sensitive in it) back to the caller. It now uses `req.path_only()`.
-- `armature dev -- <args>` no longer mangles the extra cargo arguments when `cargo-watch` is installed; they are folded into the `-x run ...` command string as the built-in watcher branch already did.
-- Removed the dangling `mod watcher;` declaration left behind when the unused, substring-matching `watcher` module was deleted.
+- Requirements on sibling armature crates name a minor instead of `0`. Under
+  Cargo's 0.x rules `version = "0"` matches any release ever made, and edition
+  2024 selects the MSRV-aware resolver, so a consumer declaring an older
+  `rust-version` was handed the oldest version satisfying it — resolving
+  `armature-core = "0"` on Rust 1.89 produced `armature-core 0.2.3` while an
+  explicit `armature-core = "0.8"` elsewhere in the same graph pulled 0.8.2.
+  Two copies of core, and a build failing on symbols the older one lacks. Each
+  0.x minor in this family is a breaking change, so the requirement now names
+  one. No API change.
