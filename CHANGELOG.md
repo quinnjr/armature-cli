@@ -9,6 +9,10 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+### Security
+
+- Require `webbrowser` 1.2.4 or later, which fixes RUSTSEC-2026-0257 (browser argument injection through the Unix `BROWSER` variable).
+
 ### Fixed
 
 - **Breaking:** unimplemented subcommands exit non-zero and are hidden. `armature deploy` reported success having deployed nothing, and `armature serve` as a container start-command exited cleanly with no server.
