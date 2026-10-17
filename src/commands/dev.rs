@@ -40,7 +40,7 @@ pub async fn run(port: u16, host: &str, cargo_args: &[String]) -> CliResult<()> 
         println!(
             "  {} Install cargo-watch for better performance: {}",
             "💡".yellow(),
-            "cargo install cargo-watch".dimmed()
+            "cargo install cargo-watch --locked".dimmed()
         );
         run_with_builtin_watcher(port, host, cargo_args, &project_root).await
     }

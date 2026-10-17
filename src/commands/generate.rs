@@ -138,7 +138,13 @@ pub async fn controller(name: &str, crud: bool, skip_tests: bool, auth: bool) ->
 
     // When --auth is set, attach an authentication guard to the controller.
     let guard_attr = if auth {
-        "#[guard(AuthGuard)]\n".to_string()
+        // The guard admits only requests carrying a *verified* `UserContext`,
+        // so the generated controller documents what must run before it.
+        "// Requires `armature::armature_auth::JwtAuthMiddleware` (app-wide or via\n\
+         // `#[middleware(...)]`, which runs before guards) and an `AuthGuard` in\n\
+         // scope, e.g. from `armature generate guard auth --guard-type auth`.\n\
+         #[guard(AuthGuard)]\n"
+            .to_string()
     } else {
         String::new()
     };
@@ -517,7 +523,12 @@ fn generate_migration(
 
 /// Generate a WebSocket handler.
 pub async fn websocket(name: &str, skip_tests: bool) -> CliResult<()> {
-    generate_component("websocket", name, skip_tests).await
+    generate_component("websocket", name, skip_tests).await?;
+    println!(
+        "  {} the handler needs `armature-websocket = \"0.5\"` in Cargo.toml",
+        "NOTE".cyan().bold()
+    );
+    Ok(())
 }
 
 /// Generate a GraphQL resolver.

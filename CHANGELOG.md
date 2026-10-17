@@ -9,6 +9,23 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+### Security
+
+- **Breaking (generated code):** every `armature generate guard` template now authorizes only from the verified `armature_auth::UserContext` attached by `JwtAuthMiddleware` and fails closed (401 without it). The permission/role guards no longer trust the client-controlled `x-user-permissions` / `x-user-role` headers, and the generic/auth guards no longer accept a bare `Authorization` header. Generated projects need the `auth` feature on `armature`.
+- The API-key guard template has no `Default`, rejects keys shorter than 32 bytes and compares in constant time; migrate with `#[guard(XGuard::from_env().expect(..))]`.
+- The rate-limit guard template keys on `HttpRequest::client_address` (socket peer unless proxies are explicitly trusted) instead of the spoofable `X-Forwarded-For`, and bounds its client table.
+- Generated Dockerfile uses `rust:1.99.1-slim-trixie` / `debian:trixie-slim` (was EOL `rust:1.75`), builds `--locked`, drops OpenSSL, runs as numeric UID 10001 and explains digest pinning. The Lambda/Cloud Run Dockerfiles mirror the digest-pinned canonical `templates/`: cargo-lambda 1.9.2 with a hardcoded SHA-256 (no skip path) and a pinned cargo-chef.
+- Generated GitHub Actions workflow pins every action to a commit SHA, sets top-level `permissions: contents: read`, checks out with `persist-credentials: false`, grants `packages: write` only to the image job and tags images with the commit SHA instead of `latest`.
+- Generated docker-compose files ship no passwords (`${VAR:?}` from `.env`), password-protect Redis and publish ports on 127.0.0.1 only; `.env.example` no longer suggests a placeholder `JWT_SECRET`. The Cloud Run service manifest deploys by digest; the SAM template flags that its API is public.
+- External `armature <name>` subcommands are no longer looked up in empty or relative `PATH` entries or the current directory, so a binary checked into an untrusted repository cannot be run by accident.
+- Install hints use `cargo install ... --locked`.
+- **Breaking (generated code):** `armature generate websocket` was rewritten against the `armature-websocket` API (it previously emitted a non-existent `WebSocket` type and a stub HTTP route). The generated module builds its server with an Origin allowlist and a handshake authorizer that requires `Authorization: Bearer <token>` and a caller-supplied `verify` function returning the connection's `Principal`; handlers receive that `Principal`. The `websockets`/`realtime` project feature now adds `armature-websocket` to the generated `Cargo.toml`.
+
+### Changed
+
+- Replaced the deprecated `serde_yaml` (unmaintained `unsafe-libyaml`) with `serde_norway`.
+- Generated projects depend on `armature-framework` 0.7 and `armature-core` 0.10 (were 0.2 / 0.4), so the templates compile against the APIs they use.
+
 ## [0.7.0] - 2026-09-15
 
 ### Changed

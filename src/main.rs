@@ -1498,7 +1498,7 @@ fn print_feature_usage_example(feature: &ArmatureFeature) {
     use armature_auth::prelude::*;
 
     let service = AuthService::new();
-    let hash = service.hash_password("secret")?;
+    let hash = service.hash_password(&password)?;
 "#
         }
         ArmatureFeature::Cache => {
@@ -1513,8 +1513,14 @@ fn print_feature_usage_example(feature: &ArmatureFeature) {
             r#"
     use armature_jwt::prelude::*;
 
-    let manager = JwtManager::new(JwtConfig::new("secret"))?;
+    // At least 32 random bytes from the environment; never a literal.
+    let secret = std::env::var("JWT_SECRET")?;
+    let manager = JwtManager::new(JwtConfig::new(secret)?)?;
     let token = manager.sign(&claims)?;
+    let verified: Claims = manager.verify_access(&token)?;
+
+    // Attach verified identities to requests before guards run:
+    // app.use_middleware(JwtAuthMiddleware::new(manager));
 "#
         }
         ArmatureFeature::Queue => {
@@ -1781,7 +1787,7 @@ async fn run_doctor() -> CliResult<()> {
             "{} cargo-watch: {} (run: {})",
             "○".yellow(),
             "not installed".yellow(),
-            "cargo install cargo-watch".dimmed()
+            "cargo install cargo-watch --locked".dimmed()
         ));
     }
 
@@ -1872,7 +1878,7 @@ async fn run_doctor() -> CliResult<()> {
                 "{} evcxr_repl: {} (run: {})",
                 "○".yellow(),
                 "not installed".yellow(),
-                "cargo install evcxr_repl".dimmed()
+                "cargo install evcxr_repl --locked".dimmed()
             ));
         }
     }
@@ -2179,7 +2185,7 @@ async fn main() {
                 eprintln!(
                     "\n  {} Install the latest release with: {}",
                     "💡".yellow(),
-                    "cargo install armature-cli --force".dimmed()
+                    "cargo install armature-cli --locked --force".dimmed()
                 );
                 Err(CliError::Unimplemented("upgrade".to_string()))
             }
