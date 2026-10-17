@@ -103,7 +103,7 @@ fn is_evcxr_installed() -> bool {
 fn repl_init_script() -> String {
     let mut script = String::new();
     // Add the armature dependency and pull in the prelude. Kept in sync with
-    // the `armature = { version = "0.7", package = "armature-framework" }`
+    // the `armature = { version = "0.8", package = "armature-framework" }`
     // pin used for generated projects in `commands/new.rs::build_dependencies`
     // / `templates.rs::ProjectData::new`.
     //
@@ -112,7 +112,7 @@ fn repl_init_script() -> String {
     // `armature-framework`, so `package = "armature-framework"` is required
     // to rename it back to `armature` for `use armature::prelude::*` below to
     // resolve.
-    script.push_str(":dep armature = { version = \"0.7\", package = \"armature-framework\" }\n");
+    script.push_str(":dep armature = { version = \"0.8\", package = \"armature-framework\" }\n");
     script.push_str("use armature::prelude::*;\n");
     script
 }

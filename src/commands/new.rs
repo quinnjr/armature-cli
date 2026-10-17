@@ -222,8 +222,8 @@ fn build_dependencies(template: &str, opts: &NewProjectOptions) -> (String, Stri
 
     // Kept in sync with the `armature` facade crate's current minor version
     // (see `[package] version` for `armature-framework` in the workspace
-    // root Cargo.toml, currently 0.7.x) and with `repl_init_script()` in
-    // `commands/repl.rs`, which pins the same `"0.7"` for `:dep armature`.
+    // root Cargo.toml, currently 0.8.x) and with `repl_init_script()` in
+    // `commands/repl.rs`, which pins the same `"0.8"` for `:dep armature`.
     //
     // NOTE: the crate name `armature` on crates.io is squatted by an
     // unrelated actor-framework crate. This project's crate is published as
@@ -231,14 +231,14 @@ fn build_dependencies(template: &str, opts: &NewProjectOptions) -> (String, Stri
     // `package = "armature-framework"` to rename it back to `armature` for
     // `use armature::...` to keep working.
     let armature_dep = if armature_features.is_empty() {
-        "armature = { version = \"0.7\", package = \"armature-framework\" }".to_string()
+        "armature = { version = \"0.8\", package = \"armature-framework\" }".to_string()
     } else {
         let quoted: Vec<String> = armature_features
             .iter()
             .map(|f| format!("\"{}\"", f))
             .collect();
         format!(
-            "armature = {{ version = \"0.7\", package = \"armature-framework\", features = [{}] }}",
+            "armature = {{ version = \"0.8\", package = \"armature-framework\", features = [{}] }}",
             quoted.join(", ")
         )
     };
@@ -1030,7 +1030,7 @@ mod tests {
         let (armature_dep, extra) = build_dependencies("minimal", &opts);
         assert_eq!(
             armature_dep,
-            "armature = { version = \"0.7\", package = \"armature-framework\" }"
+            "armature = { version = \"0.8\", package = \"armature-framework\" }"
         );
         assert!(extra.is_empty());
     }
@@ -1045,7 +1045,7 @@ mod tests {
         // storage/mail are separate crates, not armature feature flags.
         assert_eq!(
             armature_dep,
-            "armature = { version = \"0.7\", package = \"armature-framework\" }"
+            "armature = { version = \"0.8\", package = \"armature-framework\" }"
         );
         assert!(extra.contains("armature-storage"));
         assert!(extra.contains("armature-mail"));

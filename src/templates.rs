@@ -952,7 +952,7 @@ description = "{{description}}"
 # etc.), which expand to `armature_core::...` paths. Those paths aren't
 # re-exported through the `armature` facade crate, so `armature-core` must
 # also be a direct dependency for the generated code to resolve.
-armature-core = "0.10"
+armature-core = "0.11"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -4322,7 +4322,7 @@ impl ProjectData {
             // published as `armature-framework`, so `package = "armature-framework"`
             // is required to rename it back to `armature` for `use armature::...`
             // to resolve.
-            armature_dep: "armature = { version = \"0.7\", package = \"armature-framework\" }"
+            armature_dep: "armature = { version = \"0.8\", package = \"armature-framework\" }"
                 .to_string(),
             extra_deps: String::new(),
         }
