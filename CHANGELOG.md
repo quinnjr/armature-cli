@@ -19,6 +19,7 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 - Generated docker-compose files ship no passwords (`${VAR:?}` from `.env`), password-protect Redis and publish ports on 127.0.0.1 only; `.env.example` no longer suggests a placeholder `JWT_SECRET`. The Cloud Run service manifest deploys by digest; the SAM template flags that its API is public.
 - External `armature <name>` subcommands are no longer looked up in empty or relative `PATH` entries or the current directory, so a binary checked into an untrusted repository cannot be run by accident.
 - Install hints use `cargo install ... --locked`.
+- **Breaking (generated code):** `armature generate websocket` was rewritten against the `armature-websocket` API (it previously emitted a non-existent `WebSocket` type and a stub HTTP route). The generated module builds its server with an Origin allowlist and a handshake authorizer that requires `Authorization: Bearer <token>` and a caller-supplied `verify` function returning the connection's `Principal`; handlers receive that `Principal`. The `websockets`/`realtime` project feature now adds `armature-websocket` to the generated `Cargo.toml`.
 
 ### Changed
 
