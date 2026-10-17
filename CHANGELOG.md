@@ -9,6 +9,8 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-17
+
 ### Security
 
 - **Breaking (generated code):** every `armature generate guard` template now authorizes only from the verified `armature_auth::UserContext` attached by `JwtAuthMiddleware` and fails closed (401 without it). The permission/role guards no longer trust the client-controlled `x-user-permissions` / `x-user-role` headers, and the generic/auth guards no longer accept a bare `Authorization` header. Generated projects need the `auth` feature on `armature`.
