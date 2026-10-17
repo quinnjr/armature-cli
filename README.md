@@ -12,7 +12,7 @@ CLI tool for the Armature framework.
 ## Installation
 
 ```bash
-cargo install armature-cli
+cargo install armature-cli --locked
 ```
 
 ## Commands
