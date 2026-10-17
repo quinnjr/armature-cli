@@ -138,7 +138,13 @@ pub async fn controller(name: &str, crud: bool, skip_tests: bool, auth: bool) ->
 
     // When --auth is set, attach an authentication guard to the controller.
     let guard_attr = if auth {
-        "#[guard(AuthGuard)]\n".to_string()
+        // The guard admits only requests carrying a *verified* `UserContext`,
+        // so the generated controller documents what must run before it.
+        "// Requires `armature::armature_auth::JwtAuthMiddleware` (app-wide or via\n\
+         // `#[middleware(...)]`, which runs before guards) and an `AuthGuard` in\n\
+         // scope, e.g. from `armature generate guard auth --guard-type auth`.\n\
+         #[guard(AuthGuard)]\n"
+            .to_string()
     } else {
         String::new()
     };

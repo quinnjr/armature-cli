@@ -434,20 +434,22 @@ mod tests {
 // =============================================================================
 
 const GUARD_TEMPLATE: &str = r#"//! {{name_pascal}} guard.
+//!
+//! Requires the `auth` feature of the `armature` dependency. Register
+//! `armature::armature_auth::JwtAuthMiddleware` (application-wide, or on the
+//! controller with `#[middleware(...)]`) so a *verified* `UserContext` is
+//! attached to the request before this guard runs. Never authorize from raw
+//! request headers: any client can set them.
 
+use armature::armature_auth::UserContext;
 use armature::prelude::*;
 use armature::{Guard, GuardContext};
 use async_trait::async_trait;
 
 /// {{name_pascal}} guard for route protection.
 ///
-/// # Example
-///
-/// ```rust
-/// use armature::prelude::*;
-///
-/// let guard = {{name_pascal}}Guard::new();
-/// ```
+/// Fails closed: a request without a verified `UserContext` is rejected.
+#[derive(Default)]
 pub struct {{name_pascal}}Guard {
     // Add configuration fields here
 }
@@ -458,27 +460,24 @@ impl {{name_pascal}}Guard {
         Self {}
     }
 
-    /// Check if the request is authorized.
-    fn is_authorized(&self, context: &GuardContext) -> bool {
-        // TODO: Implement authorization logic
-        // Example: Check for a valid API key or JWT token
-        context.get_header("authorization").is_some()
-    }
-}
-
-impl Default for {{name_pascal}}Guard {
-    fn default() -> Self {
-        Self::new()
+    /// Decide whether the verified user may access the route.
+    fn is_authorized(&self, _user: &UserContext) -> bool {
+        // Add authorization rules on the verified identity here (roles,
+        // permissions, ownership checks, ...). Authenticated is the baseline.
+        true
     }
 }
 
 #[async_trait]
 impl Guard for {{name_pascal}}Guard {
     async fn can_activate(&self, context: &GuardContext) -> Result<bool, Error> {
-        if self.is_authorized(context) {
+        let Some(user) = context.request.extensions.get::<UserContext>() else {
+            return Err(Error::Unauthorized("Authentication required".to_string()));
+        };
+        if self.is_authorized(user) {
             Ok(true)
         } else {
-            Err(Error::Unauthorized("Access denied".to_string()))
+            Err(Error::Forbidden("Access denied".to_string()))
         }
     }
 }
@@ -491,11 +490,12 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use armature::armature_auth::UserContext;
 
     #[tokio::test]
-    async fn test_guard_denies_unauthorized() {
+    async fn test_guard_denies_unauthenticated() {
         let guard = {{name_pascal}}Guard::new();
-        let req = HttpRequest::new("GET", "/test".to_string());
+        let req = HttpRequest::new("GET", "/test");
         let context = GuardContext::new(req);
 
         let result = guard.can_activate(&context).await;
@@ -503,26 +503,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_guard_allows_authorized() {
+    async fn test_guard_ignores_client_supplied_headers() {
+        // A bearer header alone proves nothing: only a verified UserContext counts.
         let guard = {{name_pascal}}Guard::new();
-        let mut req = HttpRequest::new("GET", "/test".to_string());
-        req.headers.insert("authorization".to_string(), "Bearer token".to_string());
+        let mut req = HttpRequest::new("GET", "/test");
+        req.headers.insert("authorization", "Bearer forged");
+        let context = GuardContext::new(req);
+
+        assert!(guard.can_activate(&context).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_guard_allows_verified_user() {
+        let guard = {{name_pascal}}Guard::new();
+        let mut req = HttpRequest::new("GET", "/test");
+        req.extensions.insert(UserContext::new("user-1".to_string()));
         let context = GuardContext::new(req);
 
         let result = guard.can_activate(&context).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap());
+        assert!(matches!(result, Ok(true)));
     }
 }
 "#;
 
 const GUARD_AUTH_TEMPLATE: &str = r#"//! {{name_pascal}} authentication guard.
+//!
+//! Requires the `auth` feature of the `armature` dependency and
+//! `armature::armature_auth::JwtAuthMiddleware` registered ahead of the route
+//! (application-wide, or on the controller with `#[middleware(...)]`). The
+//! middleware verifies the bearer token's signature and claims and attaches a
+//! `UserContext`; this guard only admits requests carrying one.
 
+use armature::armature_auth::UserContext;
 use armature::prelude::*;
 use armature::{Guard, GuardContext};
 use async_trait::async_trait;
 
-/// {{name_pascal}} guard: requires a valid `Authorization: Bearer <token>` header.
+/// {{name_pascal}} guard: requires a verified, authenticated user.
+///
+/// The mere presence of an `Authorization` header is never trusted.
 #[derive(Default)]
 pub struct {{name_pascal}}Guard;
 
@@ -531,28 +550,28 @@ impl {{name_pascal}}Guard {
     pub fn new() -> Self {
         Self
     }
-
-    fn extract_bearer<'a>(&self, context: &'a GuardContext) -> Option<&'a str> {
-        context
-            .get_header("authorization")
-            .and_then(|h| h.strip_prefix("Bearer "))
-    }
 }
 
 #[async_trait]
 impl Guard for {{name_pascal}}Guard {
     async fn can_activate(&self, context: &GuardContext) -> Result<bool, Error> {
-        match self.extract_bearer(context) {
-            // TODO: verify the JWT / session token here.
-            Some(token) if !token.is_empty() => Ok(true),
-            _ => Err(Error::Unauthorized("Missing bearer token".to_string())),
+        if context.request.extensions.get::<UserContext>().is_some() {
+            Ok(true)
+        } else {
+            Err(Error::Unauthorized("Authentication required".to_string()))
         }
     }
 }
 "#;
 
 const GUARD_ROLE_TEMPLATE: &str = r#"//! {{name_pascal}} role-based guard.
+//!
+//! Requires the `auth` feature of the `armature` dependency and
+//! `armature::armature_auth::JwtAuthMiddleware` registered ahead of the route,
+//! which attaches the verified `UserContext` whose roles come from the signed
+//! token. Roles are never read from request headers.
 
+use armature::armature_auth::UserContext;
 use armature::prelude::*;
 use armature::{Guard, GuardContext};
 use async_trait::async_trait;
@@ -580,9 +599,10 @@ impl Default for {{name_pascal}}Guard {
 #[async_trait]
 impl Guard for {{name_pascal}}Guard {
     async fn can_activate(&self, context: &GuardContext) -> Result<bool, Error> {
-        // TODO: source the role from your authenticated principal.
-        let role = context.get_header("x-user-role").map(|s| s.as_str()).unwrap_or("");
-        if role == self.required_role {
+        let Some(user) = context.request.extensions.get::<UserContext>() else {
+            return Err(Error::Unauthorized("Authentication required".to_string()));
+        };
+        if !self.required_role.is_empty() && user.roles.iter().any(|r| *r == self.required_role) {
             Ok(true)
         } else {
             Err(Error::Forbidden(format!(
@@ -595,7 +615,13 @@ impl Guard for {{name_pascal}}Guard {
 "#;
 
 const GUARD_PERMISSION_TEMPLATE: &str = r#"//! {{name_pascal}} permission-based guard.
+//!
+//! Requires the `auth` feature of the `armature` dependency and
+//! `armature::armature_auth::JwtAuthMiddleware` registered ahead of the route,
+//! which attaches the verified `UserContext` whose permissions come from the
+//! signed token. Permissions are never read from request headers.
 
+use armature::armature_auth::UserContext;
 use armature::prelude::*;
 use armature::{Guard, GuardContext};
 use async_trait::async_trait;
@@ -623,11 +649,14 @@ impl Default for {{name_pascal}}Guard {
 #[async_trait]
 impl Guard for {{name_pascal}}Guard {
     async fn can_activate(&self, context: &GuardContext) -> Result<bool, Error> {
-        // TODO: source granted permissions from your authenticated principal.
-        let granted = context
-            .get_header("x-user-permissions")
-            .map(|s| s.split(',').any(|p| p.trim() == self.required_permission))
-            .unwrap_or(false);
+        let Some(user) = context.request.extensions.get::<UserContext>() else {
+            return Err(Error::Unauthorized("Authentication required".to_string()));
+        };
+        let granted = !self.required_permission.is_empty()
+            && user
+                .permissions
+                .iter()
+                .any(|p| *p == self.required_permission);
         if granted {
             Ok(true)
         } else {
@@ -646,54 +675,96 @@ use armature::prelude::*;
 use armature::{Guard, GuardContext};
 use async_trait::async_trait;
 
+/// Environment variable holding the expected API key.
+pub const API_KEY_ENV: &str = "API_KEY";
+
+/// Shortest key accepted, so a placeholder like `changeme` cannot slip through.
+const MIN_KEY_LEN: usize = 32;
+
 /// {{name_pascal}} guard: requires a matching `X-API-Key` header.
+///
+/// There is deliberately no `Default`: construct it with [`Self::from_env`] or
+/// [`Self::new`], both of which refuse an empty or short key, e.g.
+/// `#[guard({{name_pascal}}Guard::from_env().expect("API_KEY must be set"))]`.
 pub struct {{name_pascal}}Guard {
-    expected_key: String,
+    expected_key: Vec<u8>,
 }
 
 impl {{name_pascal}}Guard {
-    /// Create a new guard expecting `expected_key`.
-    pub fn new(expected_key: impl Into<String>) -> Self {
-        Self {
-            expected_key: expected_key.into(),
+    /// Create a guard expecting `expected_key` (at least 32 bytes).
+    pub fn new(expected_key: impl Into<String>) -> Result<Self, Error> {
+        let expected_key = expected_key.into();
+        if expected_key.len() < MIN_KEY_LEN {
+            return Err(Error::Internal(format!(
+                "API key must be at least {MIN_KEY_LEN} bytes"
+            )));
         }
+        Ok(Self {
+            expected_key: expected_key.into_bytes(),
+        })
     }
-}
 
-impl Default for {{name_pascal}}Guard {
-    fn default() -> Self {
-        // TODO: load the real key from configuration / environment.
-        Self::new(std::env::var("API_KEY").unwrap_or_default())
+    /// Load the expected key from `API_KEY`; fails if it is
+    /// unset, empty or too short.
+    pub fn from_env() -> Result<Self, Error> {
+        let key = std::env::var(API_KEY_ENV).map_err(|_| {
+            Error::Internal(format!("{} is not set", API_KEY_ENV))
+        })?;
+        Self::new(key)
+    }
+
+    /// Compare in constant time so response timing does not leak the key.
+    fn matches(&self, provided: &[u8]) -> bool {
+        if provided.len() != self.expected_key.len() {
+            return false;
+        }
+        provided
+            .iter()
+            .zip(&self.expected_key)
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
     }
 }
 
 #[async_trait]
 impl Guard for {{name_pascal}}Guard {
     async fn can_activate(&self, context: &GuardContext) -> Result<bool, Error> {
-        let provided = context.get_header("x-api-key").map(|s| s.as_str());
-        if !self.expected_key.is_empty() && provided == Some(self.expected_key.as_str()) {
-            Ok(true)
-        } else {
-            Err(Error::Unauthorized("Invalid API key".to_string()))
+        match context.get_header("x-api-key") {
+            Some(provided) if self.matches(provided.as_bytes()) => Ok(true),
+            _ => Err(Error::Unauthorized("Invalid API key".to_string())),
         }
     }
 }
 "#;
 
 const GUARD_RATELIMIT_TEMPLATE: &str = r#"//! {{name_pascal}} rate-limiting guard.
+//!
+//! For production, prefer the `armature-ratelimit` crate (distributed stores,
+//! sliding windows). This guard is a single-process starting point.
 
 use armature::prelude::*;
 use armature::{Guard, GuardContext};
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// {{name_pascal}} guard: rejects callers that exceed a fixed request budget per window.
+///
+/// Callers are identified by their address as resolved by
+/// `HttpRequest::client_address`: with `trusted_proxy_depth == 0` (the
+/// default) the socket peer is used and `X-Forwarded-For` is ignored, because
+/// any client can forge that header to get a fresh budget on every request.
+/// Behind N trusted reverse proxies, set the depth to N.
 pub struct {{name_pascal}}Guard {
     max_requests: u32,
     window: Duration,
-    hits: Mutex<HashMap<String, (u32, Instant)>>,
+    trusted_proxy_depth: usize,
+    /// Upper bound on tracked clients, so a flood of distinct addresses
+    /// cannot grow the table without limit.
+    max_tracked: usize,
+    hits: Mutex<HashMap<Option<IpAddr>, (u32, Instant)>>,
 }
 
 impl {{name_pascal}}Guard {
@@ -702,8 +773,17 @@ impl {{name_pascal}}Guard {
         Self {
             max_requests,
             window,
+            trusted_proxy_depth: 0,
+            max_tracked: 100_000,
             hits: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Trust the last `depth` entries of `X-Forwarded-For` (one per reverse
+    /// proxy you operate in front of this service).
+    pub fn with_trusted_proxy_depth(mut self, depth: usize) -> Self {
+        self.trusted_proxy_depth = depth;
+        self
     }
 }
 
@@ -716,18 +796,27 @@ impl Default for {{name_pascal}}Guard {
 #[async_trait]
 impl Guard for {{name_pascal}}Guard {
     async fn can_activate(&self, context: &GuardContext) -> Result<bool, Error> {
-        let key = context
-            .get_header("x-forwarded-for")
-            .cloned()
-            .unwrap_or_else(|| "anonymous".to_string());
+        // `None` (address unknown) shares one bucket: still limited, never exempt.
+        let key = context.request.client_address(self.trusted_proxy_depth);
 
-        let mut hits = self.hits.lock().unwrap();
+        let mut hits = self
+            .hits
+            .lock()
+            .map_err(|_| Error::Internal("rate limiter state poisoned".to_string()))?;
         let now = Instant::now();
+        if !hits.contains_key(&key) && hits.len() >= self.max_tracked {
+            let window = self.window;
+            hits.retain(|_, (_, started)| now.duration_since(*started) <= window);
+            if hits.len() >= self.max_tracked {
+                // Fail closed rather than grow without bound.
+                return Err(Error::TooManyRequests("Rate limit exceeded".to_string()));
+            }
+        }
         let entry = hits.entry(key).or_insert((0, now));
         if now.duration_since(entry.1) > self.window {
             *entry = (0, now);
         }
-        entry.0 += 1;
+        entry.0 = entry.0.saturating_add(1);
         if entry.0 > self.max_requests {
             Err(Error::TooManyRequests("Rate limit exceeded".to_string()))
         } else {
@@ -863,7 +952,7 @@ description = "{{description}}"
 # etc.), which expand to `armature_core::...` paths. Those paths aren't
 # re-exported through the `armature` facade crate, so `armature-core` must
 # also be a direct dependency for the generated code to resolve.
-armature-core = "0.4"
+armature-core = "0.10"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -885,14 +974,21 @@ HOST=127.0.0.1
 # Logging
 RUST_LOG=info
 
+# Copy to `.env` and fill in real values. Never commit `.env`, and never
+# reuse the example values below: generate every secret, e.g. with
+#   openssl rand -base64 48
+
 # Database (if needed)
-# DATABASE_URL=postgres://user:password@localhost:5432/{{name_snake}}
+# POSTGRES_PASSWORD=
+# DATABASE_URL=postgres://app:<POSTGRES_PASSWORD>@localhost:5432/{{name_snake}}
 
 # Redis (if needed)
-# REDIS_URL=redis://localhost:6379
+# REDIS_PASSWORD=
+# REDIS_URL=redis://:<REDIS_PASSWORD>@localhost:6379
 
-# JWT (if needed)
-# JWT_SECRET=your-secret-key-here
+# JWT (if needed). Use at least 32 random bytes; there is no default, and the
+# application must refuse to start without it.
+# JWT_SECRET=
 # JWT_EXPIRATION=3600
 "#;
 
@@ -906,7 +1002,7 @@ Built with [Armature](https://github.com/quinnjr/armature) - A modern Rust web f
 
 ### Prerequisites
 
-- Rust 1.75 or later
+- Rust 1.94.1 or later
 - Cargo
 
 ### Installation
@@ -1575,7 +1671,7 @@ const JOB_SCHEDULED_TEMPLATE: &str = r#"//! {{name_pascal}} scheduled job (runs 
 //!
 //! ```toml
 //! [dependencies]
-//! armature-cron = "0.2"
+//! armature-cron = "0.5"
 //! ```
 
 use armature_cron::{CronExpression, CronResult, CronScheduler, JobContext};
@@ -1632,7 +1728,7 @@ const JOB_RECURRING_TEMPLATE: &str = r#"//! {{name_pascal}} recurring job (runs 
 //!
 //! ```toml
 //! [dependencies]
-//! armature-cron = "0.2"
+//! armature-cron = "0.5"
 //! ```
 
 use armature_cron::{CronExpression, CronResult, CronScheduler, JobContext};
@@ -3167,16 +3263,15 @@ impl HealthController {
 // DEVOPS TEMPLATES
 // =============================================================================
 
-const DOCKERFILE_TEMPLATE: &str = r#"# Build stage
-FROM rust:1.75-slim-bookworm AS builder
+const DOCKERFILE_TEMPLATE: &str = r#"# Base images are pinned by exact tag AND digest (Rust 1.99.1 >= the 1.94.1
+# MSRV; Debian 13 runtime), never `latest`. To upgrade, change tag and digest
+# together (`docker buildx imagetools inspect <image>:<tag>` prints the
+# digest); Dependabot's `docker` ecosystem proposes the bumps.
+
+# Build stage
+FROM rust:1.99.1-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d AS builder
 
 WORKDIR /app
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
@@ -3184,43 +3279,40 @@ COPY Cargo.toml Cargo.lock ./
 # Create dummy source for dependency caching
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build dependencies only
-RUN cargo build --release && rm -rf src target/release/{{name_kebab}}*
+# Build dependencies only (--locked: never resolve new versions in CI/images)
+RUN cargo build --release --locked && rm -rf src target/release/{{name_kebab}}*
 
 # Copy actual source
 COPY src ./src
 
 # Build the application
-RUN cargo build --release
+RUN cargo build --release --locked
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies (TLS is rustls-based: no OpenSSL needed)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -r -s /bin/false appuser
+# Create an unprivileged user with a fixed numeric UID so orchestrators can
+# enforce `runAsNonRoot`
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
 
-# Copy binary from builder
+# Copy binary from builder (root-owned and read-only for the app user)
 COPY --from=builder /app/target/release/{{name_kebab}} /app/{{name_kebab}}
 
-# Set ownership
-RUN chown -R appuser:appuser /app
-
-USER appuser
+USER 10001:10001
 
 # Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+# Health checks: configure them in your orchestrator (Kubernetes probes,
+# Compose `healthcheck`) against `/health`; the slim runtime ships no curl.
 
 # Run the application
 CMD ["/app/{{name_kebab}}"]
@@ -3259,19 +3351,20 @@ const CLOUDRUN_DOCKERFILE_TEMPLATE: &str =
 // generated by the CLI), so there's no `dockerfile_azure_container` template
 // string to embed and nothing for the drift-detection tests below to guard.
 
-const DOCKER_COMPOSE_TEMPLATE: &str = r#"version: '3.8'
-
+const DOCKER_COMPOSE_TEMPLATE: &str = r#"# Local development stack. Credentials come from `.env` (never commit it);
+# Compose refuses to start if they are unset. Database and cache ports are
+# published on 127.0.0.1 only, so they are not reachable from your network.
 services:
   {{name_kebab}}:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - RUST_LOG=info
-      - DATABASE_URL=postgres://postgres:postgres@db:5432/{{name_snake}}
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgres://postgres:${{curly_open}}POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env{{curly_close}}@db:5432/{{name_snake}}
+      - REDIS_URL=redis://:${{curly_open}}REDIS_PASSWORD:?set REDIS_PASSWORD in .env{{curly_close}}@redis:6379
     depends_on:
       db:
         condition: service_healthy
@@ -3282,15 +3375,15 @@ services:
     restart: unless-stopped
 
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${{curly_open}}POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env{{curly_close}}
       - POSTGRES_DB={{name_snake}}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     networks:
       - {{name_snake}}-network
     healthcheck:
@@ -3300,18 +3393,21 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
+    command: ["redis-server", "--requirepass", "${{curly_open}}REDIS_PASSWORD:?set REDIS_PASSWORD in .env{{curly_close}}"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     networks:
       - {{name_snake}}-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${{curly_open}}REDIS_PASSWORD{{curly_close}}\" --no-auth-warning ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    environment:
+      - REDIS_PASSWORD=${{curly_open}}REDIS_PASSWORD:?set REDIS_PASSWORD in .env{{curly_close}}
 
 networks:
   {{name_snake}}-network:
@@ -3330,17 +3426,24 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: jobs get a read-only token unless they ask for more.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Third-party actions are pinned to full commit SHAs (tags can be moved);
+# the trailing comment names the release. Let Dependabot's
+# `github-actions` ecosystem keep them current.
 jobs:
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -3354,75 +3457,95 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: clippy, rustfmt
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --all-features
+        run: cargo test --locked --all-features
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{name_snake}}_test
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: test
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Build release
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: {{name_kebab}}
           path: target/release/{{name_kebab}}
 
   docker:
     name: Docker
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compute image name
+        # Registry names must be lowercase; values reach the shell through
+        # env, never through `${{curly_open}}{{curly_open}} {{curly_close}}{{curly_close}}` interpolation.
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{curly_open}}{{curly_open}} github.actor {{curly_close}}{{curly_close}}
           password: ${{curly_open}}{{curly_open}} secrets.GITHUB_TOKEN {{curly_close}}{{curly_close}}
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
-          tags: ghcr.io/${{curly_open}}{{curly_open}} github.repository {{curly_close}}{{curly_close}}:latest
+          # Immutable tag: the commit SHA. No mutable `latest` tag.
+          tags: ${{curly_open}}{{curly_open}} env.IMAGE {{curly_close}}{{curly_close}}:${{curly_open}}{{curly_open}} github.sha {{curly_close}}{{curly_close}}
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 "#;
@@ -4113,7 +4236,7 @@ impl ProjectData {
             // published as `armature-framework`, so `package = "armature-framework"`
             // is required to rename it back to `armature` for `use armature::...`
             // to resolve.
-            armature_dep: "armature = { version = \"0.2\", package = \"armature-framework\" }"
+            armature_dep: "armature = { version = \"0.7\", package = \"armature-framework\" }"
                 .to_string(),
             extra_deps: String::new(),
         }
@@ -4712,5 +4835,225 @@ mod generated_code_shape_tests {
             "EXCEPTION_FILTER_TEMPLATE must build `ErrorResponse.path` from the routing path, \
              not the raw request target"
         );
+    }
+}
+
+// =============================================================================
+// GENERATED-CODE SECURITY REGRESSION TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod generated_security_tests {
+    //! Pins the secure defaults of everything `armature new` / `armature
+    //! generate` writes into a user's project: guards that authorize only from
+    //! a verified identity, supply-chain-pinned images and CI actions, and no
+    //! shipped credentials.
+    use super::*;
+
+    fn component() -> ComponentData {
+        ComponentData {
+            name_pascal: "Admin".to_string(),
+            name_snake: "admin".to_string(),
+            name_kebab: "admin".to_string(),
+        }
+    }
+
+    fn devops() -> DevOpsData {
+        DevOpsData::new(
+            "FooBar".to_string(),
+            "foo_bar".to_string(),
+            "foo-bar".to_string(),
+        )
+    }
+
+    const ALL_GUARDS: [&str; 7] = [
+        "guard",
+        "guard_auth",
+        "guard_role",
+        "guard_permission",
+        "guard_apikey",
+        "guard_ratelimit",
+        "guard_test",
+    ];
+
+    #[test]
+    fn no_guard_template_authorizes_from_client_headers() {
+        let registry = TemplateRegistry::new();
+        for name in ALL_GUARDS {
+            let content = registry.render(name, &component()).unwrap().to_lowercase();
+            for forgeable in [
+                "x-user-permissions",
+                "x-user-role",
+                "x-user-id",
+                "x-forwarded-for",
+            ] {
+                assert!(
+                    !content.contains(&format!("\"{forgeable}\"")),
+                    "{name} must not read the client-controlled `{forgeable}` header:\n{content}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn identity_guards_require_a_verified_user_context_and_fail_closed() {
+        let registry = TemplateRegistry::new();
+        for name in ["guard", "guard_auth", "guard_role", "guard_permission"] {
+            let content = registry.render(name, &component()).unwrap();
+            assert!(
+                content.contains("extensions.get::<UserContext>()"),
+                "{name} must authorize from the verified UserContext:\n{content}"
+            );
+            assert!(
+                content.contains("Error::Unauthorized(\"Authentication required\""),
+                "{name} must reject requests without a verified identity:\n{content}"
+            );
+            // Presence of a bearer header is not authentication.
+            assert!(
+                !content.contains("get_header(\"authorization\")"),
+                "{name} must not treat an Authorization header as proof of identity:\n{content}"
+            );
+        }
+    }
+
+    #[test]
+    fn guard_test_template_proves_header_forgery_is_rejected() {
+        let content = TemplateRegistry::new()
+            .render("guard_test", &component())
+            .unwrap();
+        assert!(content.contains("test_guard_ignores_client_supplied_headers"));
+        assert!(content.contains("extensions.insert(UserContext::new"));
+    }
+
+    #[test]
+    fn apikey_guard_has_no_default_and_compares_in_constant_time() {
+        let content = TemplateRegistry::new()
+            .render("guard_apikey", &component())
+            .unwrap();
+        assert!(!content.contains("impl Default for"), "{content}");
+        assert!(!content.contains("unwrap_or_default"), "{content}");
+        assert!(content.contains("MIN_KEY_LEN"), "{content}");
+        assert!(content.contains("fold(0u8"), "{content}");
+        assert!(!content.contains("provided == Some"), "{content}");
+    }
+
+    #[test]
+    fn ratelimit_guard_uses_trusted_client_address_and_bounded_state() {
+        let content = TemplateRegistry::new()
+            .render("guard_ratelimit", &component())
+            .unwrap();
+        assert!(content.contains("client_address(self.trusted_proxy_depth)"));
+        assert!(content.contains("max_tracked"));
+        assert!(!content.contains(".lock().unwrap()"));
+    }
+
+    /// The image of every `FROM` line that names a registry image (not an
+    /// earlier build stage such as `FROM chef AS builder`).
+    fn base_images(dockerfile: &str) -> Vec<&str> {
+        dockerfile
+            .lines()
+            .filter_map(|l| l.strip_prefix("FROM "))
+            .filter_map(|rest| rest.split_whitespace().next())
+            .filter(|image| image.contains(':') || image.contains('/'))
+            .collect()
+    }
+
+    #[test]
+    fn dockerfiles_pin_supported_images_and_run_unprivileged() {
+        let generic = TemplateRegistry::new()
+            .render("dockerfile", &devops())
+            .unwrap();
+        for content in [
+            generic.as_str(),
+            LAMBDA_DOCKERFILE_TEMPLATE,
+            CLOUDRUN_DOCKERFILE_TEMPLATE,
+        ] {
+            let images = base_images(content);
+            assert!(!images.is_empty());
+            for image in images {
+                let tag = image.split('@').next().unwrap();
+                assert!(tag.contains(':'), "untagged base image: {image}");
+                assert!(!tag.contains(":latest"), "`latest` base image: {image}");
+                assert!(!tag.contains("rust:1.75"), "base image below MSRV: {image}");
+            }
+        }
+        assert!(generic.contains("rust:1.99.1-slim-trixie@sha256:"));
+        assert!(generic.contains("--locked"));
+        assert!(generic.contains("USER 10001:10001"));
+        for content in [
+            generic.as_str(),
+            LAMBDA_DOCKERFILE_TEMPLATE,
+            CLOUDRUN_DOCKERFILE_TEMPLATE,
+        ] {
+            for image in base_images(content) {
+                assert!(image.contains("@sha256:"), "not digest-pinned: {image}");
+            }
+        }
+        assert!(CLOUDRUN_DOCKERFILE_TEMPLATE.contains("USER nonroot:nonroot"));
+        assert!(CLOUDRUN_DOCKERFILE_TEMPLATE.contains("lukemathwalker/cargo-chef:0.1."));
+        assert!(!CLOUDRUN_DOCKERFILE_TEMPLATE.contains("cargo-chef:latest"));
+    }
+
+    #[test]
+    fn lambda_dockerfile_verifies_cargo_lambda_and_fails_closed() {
+        let content = LAMBDA_DOCKERFILE_TEMPLATE;
+        assert!(content.contains("ARG CARGO_LAMBDA_VERSION=1.9.2"));
+        // The real checksum of the v1.9.2 x86_64 musl release asset,
+        // hardcoded rather than a build-arg defaulting to "skip the check".
+        assert!(content.contains(
+            "CARGO_LAMBDA_SHA256=b5c258c424ebaef39541c3641f33c51137ee6c426016f365628fedb2c737271d"
+        ));
+        assert!(content.contains("sha256sum -c -"));
+        assert!(content.contains("set -eu"));
+        assert!(!content.contains("CARGO_LAMBDA_SHA256=\"\""));
+        assert!(!content.contains("skipping integrity check"));
+    }
+
+    #[test]
+    fn ci_workflow_is_least_privilege_and_sha_pinned() {
+        let content = TemplateRegistry::new()
+            .render("github_actions", &devops())
+            .unwrap();
+        assert!(
+            content.contains("\npermissions:\n  contents: read\n"),
+            "{content}"
+        );
+        for line in content.lines().filter(|l| {
+            l.trim_start().starts_with("- uses:") || l.trim_start().starts_with("uses:")
+        }) {
+            let reference = line.split('@').nth(1).unwrap_or("");
+            let sha = reference.split_whitespace().next().unwrap_or("");
+            assert!(
+                sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()),
+                "action not pinned to a full commit SHA: {line}"
+            );
+        }
+        let checkouts = content.matches("actions/checkout@").count();
+        assert_eq!(
+            content.matches("persist-credentials: false").count(),
+            checkouts
+        );
+        assert!(!content.contains(":latest"), "{content}");
+        assert!(content.contains("${{ github.sha }}"), "{content}");
+        assert!(content.contains("packages: write"));
+    }
+
+    #[test]
+    fn compose_and_env_ship_no_credentials() {
+        let compose = TemplateRegistry::new()
+            .render("docker_compose", &devops())
+            .unwrap();
+        assert!(!compose.contains("POSTGRES_PASSWORD=postgres"), "{compose}");
+        assert!(compose.contains("${POSTGRES_PASSWORD:?"), "{compose}");
+        assert!(compose.contains("--requirepass"), "{compose}");
+        for published in ["5432:5432", "6379:6379", "3000:3000"] {
+            assert!(
+                compose.contains(&format!("\"127.0.0.1:{published}\"")),
+                "{published} must be bound to localhost:\n{compose}"
+            );
+        }
+        let env = ENV_EXAMPLE_TEMPLATE;
+        assert!(!env.contains("your-secret-key-here"));
+        assert!(!env.contains("user:password@"));
     }
 }
