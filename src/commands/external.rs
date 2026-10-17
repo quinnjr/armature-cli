@@ -35,14 +35,38 @@ const RESERVED: &[&str] = &["armature-cli"];
 /// resolves commands) wins — later duplicates are silently shadowed, same
 /// as normal `$PATH` lookup semantics.
 pub fn discover_external_commands() -> BTreeMap<String, PathBuf> {
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return BTreeMap::new();
+    };
+    let cwd = std::env::current_dir().ok();
+    discover_in(&search_dirs(&path_var, cwd.as_deref()))
+}
+
+/// The `$PATH` entries that may be searched for extension binaries.
+///
+/// Only absolute directories qualify. An empty entry (`PATH=":/usr/bin"`, a
+/// trailing `:`) or a relative one (`.`, `bin`) resolves against whatever
+/// directory `armature` happens to be run from — typically a freshly cloned,
+/// untrusted repository — so a checked-in `armature-build` would be executed
+/// by `armature build`. Absolute entries that point at the current directory
+/// are dropped for the same reason.
+fn search_dirs(path_var: &std::ffi::OsStr, cwd: Option<&Path>) -> Vec<PathBuf> {
+    let cwd = cwd.and_then(|c| c.canonicalize().ok());
+    std::env::split_paths(path_var)
+        .filter(|dir| !dir.as_os_str().is_empty() && dir.is_absolute())
+        .filter(|dir| match (&cwd, dir.canonicalize()) {
+            (Some(cwd), Ok(resolved)) => &resolved != cwd,
+            _ => true,
+        })
+        .collect()
+}
+
+/// Scan `dirs` (in order) for `armature-<name>` executables.
+fn discover_in(dirs: &[PathBuf]) -> BTreeMap<String, PathBuf> {
     let mut found = BTreeMap::new();
 
-    let Some(path_var) = std::env::var_os("PATH") else {
-        return found;
-    };
-
-    for dir in std::env::split_paths(&path_var) {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
             continue;
         };
 
@@ -161,6 +185,47 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("this-definitely-does-not-exist-as-a-binary"));
+    }
+
+    #[test]
+    fn search_dirs_skips_empty_relative_and_current_directory_entries() {
+        let cwd = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let path = std::env::join_paths([
+            PathBuf::new(),
+            PathBuf::from("."),
+            PathBuf::from("bin"),
+            cwd.path().to_path_buf(),
+            other.path().to_path_buf(),
+        ])
+        .unwrap();
+        let dirs = search_dirs(&path, Some(cwd.path()));
+        assert_eq!(dirs, vec![other.path().to_path_buf()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_binary_in_the_working_directory_is_not_discovered() {
+        use std::os::unix::fs::PermissionsExt;
+        let cwd = tempfile::tempdir().unwrap();
+        let planted = cwd.path().join("armature-build");
+        std::fs::write(&planted, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Reached through ".", "" and the absolute cwd: none may count.
+        let path =
+            std::env::join_paths([PathBuf::from("."), PathBuf::new(), cwd.path().to_path_buf()])
+                .unwrap();
+        let found = discover_in(&search_dirs(&path, Some(cwd.path())));
+        assert!(found.is_empty(), "{found:?}");
+
+        // The same directory reached from elsewhere is a legitimate PATH entry.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let found = discover_in(&search_dirs(
+            &std::env::join_paths([cwd.path()]).unwrap(),
+            Some(elsewhere.path()),
+        ));
+        assert_eq!(found.get("build"), Some(&planted));
     }
 
     #[test]

@@ -174,7 +174,8 @@ fn feature_dependency(feature: &str) -> Option<Result<&'static str, &'static str
         "cache" | "caching" => Some(Ok("cache")),
         "queue" | "jobs" | "background-jobs" => Some(Ok("queue")),
         "opentelemetry" | "telemetry" => Some(Ok("opentelemetry")),
-        "websockets" | "realtime" => None, // in core; no extra dependency
+        // `armature generate websocket` emits code against this crate.
+        "websockets" | "realtime" => Some(Err("armature-websocket = \"0.5\"")),
         "storage" | "file-uploads" | "uploads" => Some(Err("armature-storage = \"0.1\"")),
         "mail" | "email" => Some(Err("armature-mail = \"0.1\"")),
         _ => None,
@@ -221,8 +222,8 @@ fn build_dependencies(template: &str, opts: &NewProjectOptions) -> (String, Stri
 
     // Kept in sync with the `armature` facade crate's current minor version
     // (see `[package] version` for `armature-framework` in the workspace
-    // root Cargo.toml, currently 0.2.x) and with `repl_init_script()` in
-    // `commands/repl.rs`, which pins the same `"0.2"` for `:dep armature`.
+    // root Cargo.toml, currently 0.8.x) and with `repl_init_script()` in
+    // `commands/repl.rs`, which pins the same `"0.8"` for `:dep armature`.
     //
     // NOTE: the crate name `armature` on crates.io is squatted by an
     // unrelated actor-framework crate. This project's crate is published as
@@ -230,14 +231,14 @@ fn build_dependencies(template: &str, opts: &NewProjectOptions) -> (String, Stri
     // `package = "armature-framework"` to rename it back to `armature` for
     // `use armature::...` to keep working.
     let armature_dep = if armature_features.is_empty() {
-        "armature = { version = \"0.2\", package = \"armature-framework\" }".to_string()
+        "armature = { version = \"0.8\", package = \"armature-framework\" }".to_string()
     } else {
         let quoted: Vec<String> = armature_features
             .iter()
             .map(|f| format!("\"{}\"", f))
             .collect();
         format!(
-            "armature = {{ version = \"0.2\", package = \"armature-framework\", features = [{}] }}",
+            "armature = {{ version = \"0.8\", package = \"armature-framework\", features = [{}] }}",
             quoted.join(", ")
         )
     };
@@ -663,37 +664,39 @@ docker-compose.yml
 *.md
 "#;
 
-const DOCKER_COMPOSE_CONTENT: &str = r#"version: '3.8'
-
+const DOCKER_COMPOSE_CONTENT: &str = r#"# Local development stack. Keep credentials in `.env` (never commit it);
+# `${VAR:?}` makes Compose refuse to start when one is unset. Ports are
+# published on 127.0.0.1 only, so nothing is reachable from your network.
 services:
   app:
     build: .
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - RUST_LOG=info
       - PORT=3000
-      # - DATABASE_URL=postgres://user:password@db:5432/app
-      # - REDIS_URL=redis://redis:6379
+      # - DATABASE_URL=postgres://app:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/app
+      # - REDIS_URL=redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379
     # depends_on:
     #   - db
     #   - redis
 
   # db:
-  #   image: postgres:16-alpine
+  #   image: postgres:17-alpine
   #   environment:
-  #     POSTGRES_USER: user
-  #     POSTGRES_PASSWORD: password
+  #     POSTGRES_USER: app
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
   #     POSTGRES_DB: app
   #   volumes:
   #     - postgres_data:/var/lib/postgresql/data
   #   ports:
-  #     - "5432:5432"
+  #     - "127.0.0.1:5432:5432"
 
   # redis:
-  #   image: redis:7-alpine
+  #   image: redis:8-alpine
+  #   command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
   #   ports:
-  #     - "6379:6379"
+  #     - "127.0.0.1:6379:6379"
 
 # volumes:
 #   postgres_data:
@@ -881,6 +884,8 @@ Resources:
       Events:
         Api:
           Type: HttpApi
+          # Public by default: add an `Auth` authorizer (JWT / IAM) to the
+          # API before exposing non-public routes.
           Properties:
             Path: /{proxy+}
             Method: ANY
@@ -903,7 +908,10 @@ spec:
   template:
     spec:
       containers:
-        - image: gcr.io/PROJECT_ID/{{name}}:latest
+        # Deploy by immutable digest (or at least a commit-SHA tag), never a
+        # mutable `latest` tag: `gcloud artifacts docker images describe
+        # <image>:<sha> --format='value(image_summary.digest)'`.
+        - image: gcr.io/PROJECT_ID/{{name}}@sha256:IMAGE_DIGEST
           ports:
             - containerPort: 3000
           env:
@@ -1022,7 +1030,7 @@ mod tests {
         let (armature_dep, extra) = build_dependencies("minimal", &opts);
         assert_eq!(
             armature_dep,
-            "armature = { version = \"0.2\", package = \"armature-framework\" }"
+            "armature = { version = \"0.8\", package = \"armature-framework\" }"
         );
         assert!(extra.is_empty());
     }
@@ -1037,9 +1045,21 @@ mod tests {
         // storage/mail are separate crates, not armature feature flags.
         assert_eq!(
             armature_dep,
-            "armature = { version = \"0.2\", package = \"armature-framework\" }"
+            "armature = { version = \"0.8\", package = \"armature-framework\" }"
         );
         assert!(extra.contains("armature-storage"));
         assert!(extra.contains("armature-mail"));
+    }
+
+    #[test]
+    fn websockets_feature_adds_the_websocket_crate() {
+        // `armature generate websocket` emits `use armature_websocket::...`;
+        // it is a separate crate, not part of armature-core.
+        let opts = NewProjectOptions {
+            features: vec!["websockets".to_string()],
+            ..Default::default()
+        };
+        let (_, extra) = build_dependencies("minimal", &opts);
+        assert!(extra.contains("armature-websocket = \"0.5\""));
     }
 }

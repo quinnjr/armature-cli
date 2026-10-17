@@ -269,7 +269,7 @@ fn render_json(routes: &[RouteInfo]) -> Result<(), CliError> {
 }
 
 fn render_yaml(routes: &[RouteInfo]) -> Result<(), CliError> {
-    let yaml = serde_yaml::to_string(routes)
+    let yaml = serde_norway::to_string(routes)
         .map_err(|e| CliError::Command(format!("Failed to serialize routes to YAML: {}", e)))?;
     print!("{}", yaml);
     Ok(())

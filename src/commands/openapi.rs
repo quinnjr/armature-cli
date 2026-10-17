@@ -102,7 +102,7 @@ fn load_spec(path: &str) -> CliResult<OpenAPI> {
         serde_json::from_str(&content)
             .map_err(|e| CliError::Command(format!("Failed to parse OpenAPI JSON: {}", e)))
     } else {
-        serde_yaml::from_str(&content)
+        serde_norway::from_str(&content)
             .map_err(|e| CliError::Command(format!("Failed to parse OpenAPI YAML: {}", e)))
     }
 }

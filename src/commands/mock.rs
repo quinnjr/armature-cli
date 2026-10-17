@@ -377,7 +377,7 @@ async fn handle_connection(
     }
 
     if path == "/_mock/spec" {
-        let body = serde_yaml::to_string(&state.spec).unwrap_or_default();
+        let body = serde_norway::to_string(&state.spec).unwrap_or_default();
 
         let response = format!(
             "HTTP/1.1 200 OK\r\n\
@@ -767,7 +767,7 @@ fn load_openapi_spec(path: &str) -> CliResult<OpenAPI> {
     let content = fs::read_to_string(path).map_err(CliError::Io)?;
 
     let spec: OpenAPI = if path.ends_with(".yaml") || path.ends_with(".yml") {
-        serde_yaml::from_str(&content)
+        serde_norway::from_str(&content)
             .map_err(|e| CliError::Config(format!("Invalid YAML: {}", e)))?
     } else {
         serde_json::from_str(&content)
