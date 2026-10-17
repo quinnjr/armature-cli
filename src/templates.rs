@@ -1289,94 +1289,144 @@ pub struct {{name_pascal}} {
 // WEBSOCKET TEMPLATES
 // =============================================================================
 
-const WEBSOCKET_TEMPLATE: &str = r#"//! {{name_pascal}} WebSocket handler.
+const WEBSOCKET_TEMPLATE: &str = r#"//! {{name_pascal}} WebSocket server.
+//!
+//! Needs `armature-websocket` and `async-trait` in `Cargo.toml`.
+//!
+//! Every upgrade request passes two checks before it becomes a connection:
+//!
+//! 1. the Origin allowlist — browsers always send `Origin`, so this is the
+//!    Cross-Site WebSocket Hijacking defence. An empty list rejects every
+//!    browser page; non-browser clients (no `Origin` header) go on to step 2;
+//! 2. the handshake authorizer built by [`{{name_snake}}_authorizer`], which
+//!    requires an `Authorization: Bearer <token>` header and asks your
+//!    `verify` function to turn the token into a [`Principal`].
+//!
+//! The server binds `127.0.0.1:9001` unless you configure another address.
 
-use armature::prelude::*;
-use armature_websocket::{WebSocket, Message, WebSocketHandler};
+use armature_websocket::{
+    HandshakeAuthorizer, HandshakeRejection, HandshakeRequest, Message, Principal, RoomManager,
+    WebSocketHandler, WebSocketResult, WebSocketServer, WebSocketServerBuilder,
+};
 use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::broadcast;
+use std::sync::{Arc, OnceLock};
+
+/// Room every authenticated {{name_snake}} connection joins.
+pub const ROOM: &str = "{{name_kebab}}";
 
 /// {{name_pascal}} WebSocket handler.
 ///
-/// Handles real-time {{name_snake}} events.
+/// Echoes each text message to its sender and relays it to the other members
+/// of [`ROOM`].
+#[derive(Clone, Default)]
 pub struct {{name_pascal}}WebSocket {
-    /// Broadcast channel for messages.
-    tx: broadcast::Sender<String>,
+    /// The server's room manager, set by [`{{name_snake}}_websocket_server`].
+    rooms: Arc<OnceLock<Arc<RoomManager>>>,
 }
 
 impl {{name_pascal}}WebSocket {
     /// Create a new WebSocket handler.
     pub fn new() -> Self {
-        let (tx, _) = broadcast::channel(100);
-        Self { tx }
+        Self::default()
     }
 
-    /// Broadcast a message to all connected clients.
-    pub fn broadcast(&self, message: &str) {
-        let _ = self.tx.send(message.to_string());
-    }
-}
-
-impl Default for {{name_pascal}}WebSocket {
-    fn default() -> Self {
-        Self::new()
+    fn rooms(&self) -> Option<&Arc<RoomManager>> {
+        self.rooms.get()
     }
 }
 
 #[async_trait]
 impl WebSocketHandler for {{name_pascal}}WebSocket {
-    async fn on_connect(&self, ws: &WebSocket) -> Result<(), Error> {
-        tracing::info!("{{name_pascal}}WebSocket: Client connected: {}", ws.id());
-        Ok(())
-    }
-
-    async fn on_message(&self, ws: &WebSocket, msg: Message) -> Result<(), Error> {
-        match msg {
-            Message::Text(text) => {
-                tracing::debug!("{{name_pascal}}WebSocket: Received text: {}", text);
-
-                // Echo back to sender
-                ws.send(Message::Text(format!("Echo: {}", text))).await?;
-
-                // Broadcast to all clients
-                self.broadcast(&text);
-            }
-            Message::Binary(data) => {
-                tracing::debug!("{{name_pascal}}WebSocket: Received binary: {} bytes", data.len());
-                ws.send(Message::Binary(data)).await?;
-            }
-            Message::Ping(data) => {
-                ws.send(Message::Pong(data)).await?;
-            }
-            Message::Pong(_) => {}
-            Message::Close(_) => {
-                tracing::info!("{{name_pascal}}WebSocket: Client closing connection");
+    async fn on_connect(&self, connection_id: &str, principal: &Principal) {
+        tracing::info!(
+            connection_id,
+            subject = principal.subject().unwrap_or("<anonymous>"),
+            "{{name_pascal}}WebSocket: client connected"
+        );
+        if let Some(rooms) = self.rooms() {
+            if let Err(e) = rooms.join_room(connection_id, ROOM) {
+                tracing::warn!(connection_id, error = %e, "{{name_pascal}}WebSocket: join failed");
             }
         }
-        Ok(())
     }
 
-    async fn on_disconnect(&self, ws: &WebSocket) -> Result<(), Error> {
-        tracing::info!("{{name_pascal}}WebSocket: Client disconnected: {}", ws.id());
-        Ok(())
+    async fn on_message(&self, connection_id: &str, principal: &Principal, message: Message) {
+        let Some(rooms) = self.rooms() else {
+            return;
+        };
+        let Some(text) = message.as_text() else {
+            // Binary, ping and pong frames are not part of this protocol.
+            return;
+        };
+        tracing::debug!(
+            connection_id,
+            subject = principal.subject().unwrap_or("<anonymous>"),
+            len = text.len(),
+            "{{name_pascal}}WebSocket: received text"
+        );
+
+        if let Some(conn) = rooms.get_connection(connection_id) {
+            // A full outbound queue evicts the slow consumer; nothing to do here.
+            let _ = conn.send_text(format!("Echo: {text}"));
+        }
+        let _ = rooms.broadcast_to_room_except(
+            ROOM,
+            Message::text(text.to_string()),
+            connection_id,
+        );
     }
 
-    async fn on_error(&self, ws: &WebSocket, error: Error) -> Result<(), Error> {
-        tracing::error!("{{name_pascal}}WebSocket: Error for client {}: {}", ws.id(), error);
-        Ok(())
+    async fn on_disconnect(&self, connection_id: &str, _principal: &Principal) {
+        tracing::info!(connection_id, "{{name_pascal}}WebSocket: client disconnected");
+        if let Some(rooms) = self.rooms() {
+            let _ = rooms.leave_room(connection_id, ROOM);
+        }
     }
 }
 
-/// Create WebSocket route.
-pub fn {{name_snake}}_websocket_route() -> impl Fn(HttpRequest) -> Result<HttpResponse, Error> {
-    let handler = Arc::new({{name_pascal}}WebSocket::new());
-
-    move |req: HttpRequest| {
-        let handler = handler.clone();
-        // WebSocket upgrade logic here
-        Ok(HttpResponse::ok())
+/// Build the handshake authorizer for {{name_snake}} connections.
+///
+/// Requires `Authorization: Bearer <token>`; `verify` maps a token to the
+/// connection's [`Principal`] (for example by verifying a JWT with
+/// `armature_jwt::JwtManager`) and returns `None` to refuse it. A missing or
+/// malformed header is refused with `401` before `verify` runs.
+pub fn {{name_snake}}_authorizer<F>(verify: F) -> impl HandshakeAuthorizer
+where
+    F: Fn(&str) -> Option<Principal> + Send + Sync + 'static,
+{
+    move |req: &HandshakeRequest| {
+        let token = req
+            .headers()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .filter(|t| !t.is_empty())
+            .ok_or_else(HandshakeRejection::unauthorized)?;
+        verify(token).ok_or_else(HandshakeRejection::unauthorized)
     }
+}
+
+/// Build the {{name_snake}} WebSocket server.
+///
+/// `allowed_origins` lists the exact browser origins (`https://app.example.com`)
+/// that may connect; pass an empty list to admit only non-browser clients.
+/// Run it with `server.run().await`.
+pub fn {{name_snake}}_websocket_server<I, S>(
+    allowed_origins: I,
+    authorizer: impl HandshakeAuthorizer,
+) -> WebSocketResult<WebSocketServer<{{name_pascal}}WebSocket>>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let handler = {{name_pascal}}WebSocket::new();
+    let rooms = Arc::clone(&handler.rooms);
+    let server = WebSocketServerBuilder::new()
+        .allowed_origins(allowed_origins)
+        .authorizer(authorizer)
+        .build(handler)?;
+    let _ = rooms.set(Arc::clone(server.room_manager()));
+    Ok(server)
 }
 "#;
 
@@ -1387,12 +1437,48 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use armature_websocket::HandshakeAuthorizer;
 
-    #[tokio::test]
-    async fn test_websocket_creation() {
-        let ws = {{name_pascal}}WebSocket::new();
-        // Test broadcast doesn't panic with no receivers
-        ws.broadcast("test message");
+    fn request(authorization: Option<&str>) -> HandshakeRequest {
+        let mut builder = HandshakeRequest::builder().uri("/");
+        if let Some(value) = authorization {
+            builder = builder.header("authorization", value);
+        }
+        builder.body(()).unwrap()
+    }
+
+    fn verify(token: &str) -> Option<Principal> {
+        (token == "valid").then(|| Principal::new("user-1"))
+    }
+
+    #[test]
+    fn test_authorizer_rejects_missing_token() {
+        let auth = {{name_snake}}_authorizer(verify);
+        assert!(auth.authorize(&request(None)).is_err());
+        assert!(auth.authorize(&request(Some("Basic dXNlcjpwYXNz"))).is_err());
+        assert!(auth.authorize(&request(Some("Bearer "))).is_err());
+    }
+
+    #[test]
+    fn test_authorizer_rejects_unverified_token() {
+        let auth = {{name_snake}}_authorizer(verify);
+        assert!(auth.authorize(&request(Some("Bearer forged"))).is_err());
+    }
+
+    #[test]
+    fn test_authorizer_accepts_verified_token() {
+        let auth = {{name_snake}}_authorizer(verify);
+        let principal = auth.authorize(&request(Some("Bearer valid"))).unwrap();
+        assert_eq!(principal.subject(), Some("user-1"));
+    }
+
+    #[test]
+    fn test_server_builds() {
+        let server = {{name_snake}}_websocket_server(
+            ["https://app.example.com"],
+            {{name_snake}}_authorizer(verify),
+        );
+        assert!(server.is_ok());
     }
 }
 "#;
@@ -4875,6 +4961,34 @@ mod generated_security_tests {
         "guard_ratelimit",
         "guard_test",
     ];
+
+    #[test]
+    fn websocket_template_authorizes_the_handshake() {
+        // The template must target the real armature-websocket API and keep
+        // its secure defaults: an Origin allowlist plus a bearer-token
+        // authorizer, never `allow_anonymous`/`OriginPolicy::Any`.
+        let out = TemplateRegistry::new()
+            .render("websocket", &component())
+            .unwrap();
+        for needle in [
+            "use armature_websocket::{",
+            ".allowed_origins(allowed_origins)",
+            ".authorizer(authorizer)",
+            "HandshakeRejection::unauthorized",
+            "principal: &Principal",
+        ] {
+            assert!(out.contains(needle), "websocket template lacks `{needle}`");
+        }
+        for banned in [
+            "allow_anonymous",
+            "AllowAnonymous",
+            "OriginPolicy::Any",
+            "WebSocket, Message",
+            "0.0.0.0",
+        ] {
+            assert!(!out.contains(banned), "websocket template emits `{banned}`");
+        }
+    }
 
     #[test]
     fn no_guard_template_authorizes_from_client_headers() {

@@ -523,7 +523,12 @@ fn generate_migration(
 
 /// Generate a WebSocket handler.
 pub async fn websocket(name: &str, skip_tests: bool) -> CliResult<()> {
-    generate_component("websocket", name, skip_tests).await
+    generate_component("websocket", name, skip_tests).await?;
+    println!(
+        "  {} the handler needs `armature-websocket = \"0.5\"` in Cargo.toml",
+        "NOTE".cyan().bold()
+    );
+    Ok(())
 }
 
 /// Generate a GraphQL resolver.

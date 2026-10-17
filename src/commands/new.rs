@@ -174,7 +174,8 @@ fn feature_dependency(feature: &str) -> Option<Result<&'static str, &'static str
         "cache" | "caching" => Some(Ok("cache")),
         "queue" | "jobs" | "background-jobs" => Some(Ok("queue")),
         "opentelemetry" | "telemetry" => Some(Ok("opentelemetry")),
-        "websockets" | "realtime" => None, // in core; no extra dependency
+        // `armature generate websocket` emits code against this crate.
+        "websockets" | "realtime" => Some(Err("armature-websocket = \"0.5\"")),
         "storage" | "file-uploads" | "uploads" => Some(Err("armature-storage = \"0.1\"")),
         "mail" | "email" => Some(Err("armature-mail = \"0.1\"")),
         _ => None,
@@ -1048,5 +1049,17 @@ mod tests {
         );
         assert!(extra.contains("armature-storage"));
         assert!(extra.contains("armature-mail"));
+    }
+
+    #[test]
+    fn websockets_feature_adds_the_websocket_crate() {
+        // `armature generate websocket` emits `use armature_websocket::...`;
+        // it is a separate crate, not part of armature-core.
+        let opts = NewProjectOptions {
+            features: vec!["websockets".to_string()],
+            ..Default::default()
+        };
+        let (_, extra) = build_dependencies("minimal", &opts);
+        assert!(extra.contains("armature-websocket = \"0.5\""));
     }
 }
