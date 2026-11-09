@@ -47,7 +47,7 @@ openapiv3 = "2.2"
 reqwest = { version = "0.13", features = ["json"], default-features = false }
 
 # Mock server (uses armature-core)
-armature-core = { version = "0.12" }
+armature-core = { version = "0.13" }
 
 # Rhai application runner
 armature-app = { version = "0.7" }
