@@ -278,7 +278,7 @@ fn generate_dto_injects_fields() {
         .assert()
         .success();
 
-    let dto = fs::read_to_string(tmp.path().join("src/dto/user.rs")).unwrap();
+    let dto = fs::read_to_string(tmp.path().join("src/user/user_dto.rs")).unwrap();
     assert!(
         dto.contains("pub name: String"),
         "DTO must contain the requested name field, got:\n{dto}"
@@ -305,10 +305,10 @@ fn generate_model_writes_struct_with_fields() {
         .assert()
         .success();
 
-    let model_file = tmp.path().join("src/models/user.rs");
+    let model_file = tmp.path().join("src/user/user_model.rs");
     assert!(
         model_file.exists(),
-        "expected src/models/user.rs to be written"
+        "expected src/user/user_model.rs to be written"
     );
 
     let model = fs::read_to_string(&model_file).unwrap();
@@ -329,11 +329,16 @@ fn generate_model_writes_struct_with_fields() {
         "model must contain the requested active field, got:\n{model}"
     );
 
-    // src/models/mod.rs must be created/updated to declare the new module.
-    let mod_file = fs::read_to_string(tmp.path().join("src/models/mod.rs")).unwrap();
+    // The module tree must declare the new file up to the crate root.
+    let mod_file = fs::read_to_string(tmp.path().join("src/user/mod.rs")).unwrap();
     assert!(
-        mod_file.contains("pub mod user;"),
-        "models/mod.rs must declare the new module, got:\n{mod_file}"
+        mod_file.contains("pub mod user_model;"),
+        "user/mod.rs must declare the new module, got:\n{mod_file}"
+    );
+    let main = fs::read_to_string(tmp.path().join("src/main.rs")).unwrap();
+    assert!(
+        main.contains("mod user;"),
+        "main.rs must declare `user`, got:\n{main}"
     );
 
     // No migration was requested, so no migrations directory should exist.
@@ -360,7 +365,7 @@ fn generate_model_with_migration_writes_up_and_down_sql() {
         .assert()
         .success();
 
-    assert_exists(tmp.path(), "src/models/post.rs");
+    assert_exists(tmp.path(), "src/post/post_model.rs");
 
     let migrations_dir = tmp.path().join("migrations");
     assert!(
@@ -673,6 +678,281 @@ fn generated_minimal_project_cargo_checks() {
     assert!(
         status.success(),
         "generated minimal project should cargo-check"
+    );
+}
+
+/// Run `armature new <name> --template minimal` in `dir`, return the project root.
+fn new_minimal_project(dir: &Path, name: &str) -> std::path::PathBuf {
+    armature_in(dir)
+        .args(["new", name, "--template", "minimal", "--skip-git"])
+        .assert()
+        .success();
+    dir.join(name)
+}
+
+#[test]
+fn generate_resource_takes_its_path_from_the_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = new_minimal_project(tmp.path(), "shop");
+
+    armature_in(&root)
+        .args(["generate", "resource", "modules/products", "--crud"])
+        .assert()
+        .success();
+
+    for f in [
+        "src/modules/mod.rs",
+        "src/modules/products/mod.rs",
+        "src/modules/products/products_controller.rs",
+        "src/modules/products/products_service.rs",
+        "src/modules/products/tests/products_controller_test.rs",
+        "src/modules/products/tests/products_service_test.rs",
+    ] {
+        assert_exists(&root, f);
+    }
+    for f in ["src/mod.rs", "src/modules/products/tests/mod.rs"] {
+        assert!(!root.join(f).exists(), "unexpected {f}");
+    }
+
+    let module = fs::read_to_string(root.join("src/modules/products/mod.rs")).unwrap();
+    for expected in [
+        "pub mod products_controller;",
+        "pub mod products_service;",
+        "controllers: [products_controller::ProductsController]",
+        "providers: [products_service::ProductsService]",
+        "pub struct ProductsModule;",
+        "mod tests {\n    mod products_controller_test;\n    mod products_service_test;\n}",
+    ] {
+        assert!(
+            module.contains(expected),
+            "missing {expected:?} in:\n{module}"
+        );
+    }
+
+    let controller =
+        fs::read_to_string(root.join("src/modules/products/products_controller.rs")).unwrap();
+    assert!(controller.contains("#[controller(\"/products\")]"));
+    assert!(controller.contains("use super::products_service::"));
+    for route in ["#[post(\"/\")]", "#[put(\"/:id\")]", "#[delete(\"/:id\")]"] {
+        assert!(controller.contains(route), "missing {route}");
+    }
+
+    assert_eq!(
+        fs::read_to_string(root.join("src/modules/mod.rs")).unwrap(),
+        "pub mod products;\n"
+    );
+    let main = fs::read_to_string(root.join("src/main.rs")).unwrap();
+    assert!(main.contains("mod modules;"), "{main}");
+    assert!(
+        main.contains("imports: [modules::products::ProductsModule]"),
+        "{main}"
+    );
+
+    // Generating it again fails without touching anything.
+    let before = fs::read_to_string(root.join("src/main.rs")).unwrap();
+    armature_in(&root)
+        .args(["generate", "resource", "modules/products"])
+        .assert()
+        .failure();
+    assert_eq!(
+        fs::read_to_string(root.join("src/main.rs")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn elements_are_registered_in_the_nearest_module() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = new_minimal_project(tmp.path(), "shop");
+
+    armature_in(&root)
+        .args(["g", "mo", "modules/catalog"])
+        .assert()
+        .success();
+    // Inside the module's directory: registered in CatalogModule.
+    armature_in(&root)
+        .args(["g", "co", "modules/catalog/items", "--crud"])
+        .assert()
+        .success();
+    armature_in(&root)
+        .args(["g", "s", "modules/catalog/items"])
+        .assert()
+        .success();
+    // Elsewhere: registered in AppModule.
+    armature_in(&root)
+        .args(["g", "pr", "shared/clock"])
+        .assert()
+        .success();
+
+    let catalog = fs::read_to_string(root.join("src/modules/catalog/mod.rs")).unwrap();
+    assert!(catalog.contains("pub mod items;"));
+    assert!(
+        catalog.contains("controllers: [items::items_controller::ItemsController]"),
+        "{catalog}"
+    );
+    assert!(
+        catalog.contains("providers: [items::items_service::ItemsService]"),
+        "{catalog}"
+    );
+    assert_exists(&root, "src/modules/catalog/items/items_controller.rs");
+    assert_exists(
+        &root,
+        "src/modules/catalog/items/tests/items_service_test.rs",
+    );
+
+    let main = fs::read_to_string(root.join("src/main.rs")).unwrap();
+    assert!(
+        main.contains("imports: [modules::catalog::CatalogModule]"),
+        "{main}"
+    );
+    assert!(
+        main.contains("providers: [shared::clock::clock_provider::ClockProvider]"),
+        "{main}"
+    );
+}
+
+#[test]
+fn flat_skip_import_no_spec_and_dry_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = new_minimal_project(tmp.path(), "shop");
+    let main_before = fs::read_to_string(root.join("src/main.rs")).unwrap();
+
+    // --dry-run writes nothing.
+    armature_in(&root)
+        .args(["g", "res", "modules/orders", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "CREATE src/modules/orders/orders_service.rs",
+        ))
+        .stdout(predicate::str::contains("Dry run"));
+    assert!(!root.join("src/modules").exists());
+    assert_eq!(
+        fs::read_to_string(root.join("src/main.rs")).unwrap(),
+        main_before
+    );
+
+    // --flat: no directory for the element; --no-spec: no test.
+    armature_in(&root)
+        .args(["g", "s", "shared/mailer", "--flat", "--no-spec"])
+        .assert()
+        .success();
+    assert_exists(&root, "src/shared/mailer_service.rs");
+    assert!(!root.join("src/shared/mailer").exists());
+    assert!(!root.join("src/shared/tests").exists());
+
+    // --skip-import: declared for Rust, not registered in a module.
+    armature_in(&root)
+        .args(["g", "co", "admin", "--skip-import"])
+        .assert()
+        .success();
+    let main = fs::read_to_string(root.join("src/main.rs")).unwrap();
+    assert!(main.contains("mod admin;"));
+    assert!(!main.contains("AdminController"), "{main}");
+}
+
+#[test]
+fn generate_module_lists_existing_elements_by_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = new_minimal_project(tmp.path(), "shop");
+
+    armature_in(&root)
+        .args([
+            "generate",
+            "module",
+            "admin",
+            "-c",
+            "admin/users",
+            "-p",
+            "admin/users",
+        ])
+        .assert()
+        .success();
+
+    let module = fs::read_to_string(root.join("src/admin/mod.rs")).unwrap();
+    assert!(
+        module.contains("controllers: [users::users_controller::UsersController]"),
+        "{module}"
+    );
+    assert!(
+        module.contains("providers: [users::users_service::UsersService]"),
+        "{module}"
+    );
+}
+
+#[test]
+fn nestjs_library_updates_the_workspace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = new_minimal_project(tmp.path(), "shop");
+
+    armature_in(&root)
+        .args(["g", "lib", "shared-utils"])
+        .assert()
+        .success();
+    assert_exists(&root, "libs/shared-utils/Cargo.toml");
+    assert_exists(&root, "libs/shared-utils/src/lib.rs");
+    let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    assert!(
+        manifest.contains("shared-utils = { path = \"libs/shared-utils\" }"),
+        "{manifest}"
+    );
+    assert!(
+        manifest.contains("members = [\"libs/shared-utils\"]"),
+        "{manifest}"
+    );
+    let lib_manifest = fs::read_to_string(root.join("libs/shared-utils/Cargo.toml")).unwrap();
+    assert!(lib_manifest.contains("armature = {"), "{lib_manifest}");
+    assert!(lib_manifest.contains("armature-core ="), "{lib_manifest}");
+}
+
+/// End-to-end: every NestJS-style element generated into a fresh project
+/// builds and its tests pass. Needs crates.io, hence ignored like the check
+/// above.
+#[test]
+#[ignore = "compiles a generated project; slow and needs network for crates.io"]
+fn generated_resource_builds_and_its_tests_pass() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = new_minimal_project(tmp.path(), "shop");
+    armature_in(&root)
+        .args(["generate", "resource", "modules/products", "--crud"])
+        .assert()
+        .success();
+    for args in [
+        &["generate", "resource", "categories"][..],
+        &["generate", "controller", "modules/products/admin"],
+        &["generate", "provider", "shared/clock"],
+        &["generate", "class", "shared/money"],
+        &["generate", "interface", "shared/payment"],
+        &["generate", "decorator", "common/tenant"],
+        &["generate", "guard", "common/access"],
+        &["generate", "middleware", "common/logging"],
+        &["generate", "interceptor", "common/timing"],
+        &["generate", "filter", "common/http"],
+        &["generate", "pipe", "common/validation"],
+        &["generate", "config", "app"],
+    ] {
+        armature_in(&root).args(args).assert().success();
+    }
+
+    let output = std::process::Command::new("cargo")
+        .args(["test", "--color", "never"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "generated project must build and pass its tests:\n{}\n{}",
+        stdout,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains(
+            "modules::products::tests::products_controller_test::create_returns_201 ... ok"
+        )
+    );
+    assert!(
+        stdout.contains("categories::tests::categories_service_test::find_all_starts_empty ... ok")
     );
 }
 

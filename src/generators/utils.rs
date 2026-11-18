@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{CliError, CliResult};
 
 /// Convert a name to various case formats.
+#[derive(Debug, Clone)]
 pub struct NameCases {
     pub pascal: String,
     pub snake: String,

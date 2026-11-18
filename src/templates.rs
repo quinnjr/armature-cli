@@ -23,6 +23,35 @@ impl TemplateRegistry {
             .expect("Failed to register controller test template");
         hbs.register_template_string("module", MODULE_TEMPLATE)
             .expect("Failed to register module template");
+        hbs.register_template_string("class", CLASS_TEMPLATE)
+            .expect("Failed to register class template");
+        hbs.register_template_string("class_test", CLASS_TEST_TEMPLATE)
+            .expect("Failed to register class_test template");
+        hbs.register_template_string("interface", INTERFACE_TEMPLATE)
+            .expect("Failed to register interface template");
+        hbs.register_template_string("provider", PROVIDER_TEMPLATE)
+            .expect("Failed to register provider template");
+        hbs.register_template_string("provider_test", PROVIDER_TEST_TEMPLATE)
+            .expect("Failed to register provider_test template");
+        hbs.register_template_string("decorator", DECORATOR_TEMPLATE)
+            .expect("Failed to register decorator template");
+        hbs.register_template_string("decorator_test", DECORATOR_TEST_TEMPLATE)
+            .expect("Failed to register decorator_test template");
+        hbs.register_template_string("library_cargo_toml", LIBRARY_CARGO_TOML_TEMPLATE)
+            .expect("Failed to register library_cargo_toml template");
+        hbs.register_template_string("library_lib", LIBRARY_LIB_TEMPLATE)
+            .expect("Failed to register library_lib template");
+        hbs.register_template_string("resource_controller", RESOURCE_CONTROLLER_TEMPLATE)
+            .expect("Failed to register resource_controller template");
+        hbs.register_template_string("resource_service", RESOURCE_SERVICE_TEMPLATE)
+            .expect("Failed to register resource_service template");
+        hbs.register_template_string(
+            "resource_controller_test",
+            RESOURCE_CONTROLLER_TEST_TEMPLATE,
+        )
+        .expect("Failed to register resource_controller_test template");
+        hbs.register_template_string("resource_service_test", RESOURCE_SERVICE_TEST_TEMPLATE)
+            .expect("Failed to register resource_service_test template");
         hbs.register_template_string("middleware", MIDDLEWARE_TEMPLATE)
             .expect("Failed to register middleware template");
         hbs.register_template_string("middleware_test", MIDDLEWARE_TEST_TEMPLATE)
@@ -125,10 +154,6 @@ impl TemplateRegistry {
             .expect("Failed to register GitHub Actions template");
         hbs.register_template_string("integration_test", INTEGRATION_TEST_TEMPLATE)
             .expect("Failed to register integration test template");
-        hbs.register_template_string("scheduler", SCHEDULER_TEMPLATE)
-            .expect("Failed to register scheduler template");
-        hbs.register_template_string("scheduler_test", SCHEDULER_TEST_TEMPLATE)
-            .expect("Failed to register scheduler test template");
         hbs.register_template_string("cache_service", CACHE_SERVICE_TEMPLATE)
             .expect("Failed to register cache service template");
         hbs.register_template_string("cache_service_test", CACHE_SERVICE_TEST_TEMPLATE)
@@ -292,7 +317,7 @@ impl {{name_pascal}}Controller {
         // TODO: Implement delete logic
         let _ = id;
 
-        HttpResponse::no_content()
+        Ok(HttpResponse::no_content())
     }
 }
 "#;
@@ -334,23 +359,485 @@ const MODULE_TEMPLATE: &str = r#"//! {{name_pascal}} module.
 
 use armature::prelude::*;
 
-{{#each controllers}}
-mod {{this}};
-pub use {{this}}::{{this_pascal}}Controller;
-{{/each}}
-
-{{#each providers}}
-mod {{this}};
-pub use {{this}}::{{this_pascal}}Service;
-{{/each}}
-
-/// {{name_pascal}} module bundles related controllers and providers.
+/// {{name_pascal}} module: `armature generate controller|service <path>` in
+/// this directory registers new elements here.
 #[module(
-    controllers: [{{controller_list}}],
-    providers: [{{provider_list}}]
+    controllers: [{{{controller_list}}}],
+    providers: [{{{provider_list}}}]
 )]
 #[derive(Default)]
 pub struct {{name_pascal}}Module;
+"#;
+
+// =============================================================================
+// RESOURCE (FEATURE MODULE) TEMPLATES
+// =============================================================================
+//
+// `armature generate resource <path>/<name>` emits, in `src/<path>/<name>/`:
+// `mod.rs` (the module, from MODULE_TEMPLATE), `<name>_controller.rs`,
+// `<name>_service.rs` and `tests/<name>_{controller,service}_test.rs`.
+
+const RESOURCE_CONTROLLER_TEMPLATE: &str = r#"//! {{name_pascal}} controller: HTTP layer of the `{{name_snake}}` module.
+
+use armature::prelude::*;
+
+{{#if crud}}
+use super::{{name_snake}}_service::{Create{{entity_pascal}}Dto, {{name_pascal}}Service, Update{{entity_pascal}}Dto};
+{{else}}
+use super::{{name_snake}}_service::{{name_pascal}}Service;
+{{/if}}
+
+/// Handles `/{{base_path}}` and delegates to [`{{name_pascal}}Service`].
+///
+/// Fields are resolved from the dependency-injection container, so the
+/// service is injected automatically when the module is registered.
+#[controller("/{{base_path}}")]
+pub struct {{name_pascal}}Controller {
+    service: {{name_pascal}}Service,
+}
+
+#[routes]
+impl {{name_pascal}}Controller {
+    /// List all {{name_snake}}.
+    ///
+    /// GET /{{base_path}}
+    #[get("/")]
+    pub async fn index(&self, _req: HttpRequest) -> Result<HttpResponse, Error> {
+        let items = self.service.find_all().await?;
+        HttpResponse::ok().with_json(&items)
+    }
+
+    /// Get one {{entity_snake}} by id.
+    ///
+    /// GET /{{base_path}}/:id
+    #[get("/:id")]
+    pub async fn show(&self, req: HttpRequest) -> Result<HttpResponse, Error> {
+        let id = parse_id(&req)?;
+        match self.service.find_by_id(id).await? {
+            Some(item) => HttpResponse::ok().with_json(&item),
+            None => Err(not_found(id)),
+        }
+    }
+{{#if crud}}
+
+    /// Create a {{entity_snake}}.
+    ///
+    /// POST /{{base_path}}
+    #[post("/")]
+    pub async fn create(&self, req: HttpRequest) -> Result<HttpResponse, Error> {
+        let dto: Create{{entity_pascal}}Dto = req.json()?;
+        let item = self.service.create(dto).await?;
+        HttpResponse::created().with_json(&item)
+    }
+
+    /// Update a {{entity_snake}}.
+    ///
+    /// PUT /{{base_path}}/:id
+    #[put("/:id")]
+    pub async fn update(&self, req: HttpRequest) -> Result<HttpResponse, Error> {
+        let id = parse_id(&req)?;
+        let dto: Update{{entity_pascal}}Dto = req.json()?;
+        match self.service.update(id, dto).await? {
+            Some(item) => HttpResponse::ok().with_json(&item),
+            None => Err(not_found(id)),
+        }
+    }
+
+    /// Delete a {{entity_snake}}.
+    ///
+    /// DELETE /{{base_path}}/:id
+    #[delete("/:id")]
+    pub async fn destroy(&self, req: HttpRequest) -> Result<HttpResponse, Error> {
+        let id = parse_id(&req)?;
+        if self.service.delete(id).await? {
+            Ok(HttpResponse::no_content())
+        } else {
+            Err(not_found(id))
+        }
+    }
+{{/if}}
+}
+
+/// Read the `:id` path parameter.
+fn parse_id(req: &HttpRequest) -> Result<u64, Error> {
+    req.param("id")
+        .ok_or_else(|| Error::BadRequest("missing id parameter".to_string()))?
+        .parse()
+        .map_err(|_| Error::BadRequest("id must be a positive integer".to_string()))
+}
+
+fn not_found(id: u64) -> Error {
+    Error::NotFound(format!("{{entity_snake}} {id} not found"))
+}
+"#;
+
+const RESOURCE_SERVICE_TEMPLATE: &str = r#"//! {{name_pascal}} service: business logic of the `{{name_snake}}` module.
+
+use armature::prelude::*;
+use serde::{Deserialize, Serialize};
+
+/// A {{entity_snake}}.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct {{entity_pascal}} {
+    pub id: u64,
+    pub name: String,
+}
+{{#if crud}}
+
+/// Payload to create a {{entity_snake}}.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Create{{entity_pascal}}Dto {
+    pub name: String,
+}
+
+/// Payload to update a {{entity_snake}}; absent fields are left unchanged.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Update{{entity_pascal}}Dto {
+    pub name: Option<String>,
+}
+{{/if}}
+
+/// Business logic for {{name_snake}}.
+///
+/// Registered as a provider of `{{name_pascal}}Module` and injected into
+/// `{{name_pascal}}Controller`. Fields added here (repositories, other
+/// services…) are resolved from the container as well.
+#[derive(Clone, Default)]
+#[injectable]
+pub struct {{name_pascal}}Service {}
+
+impl {{name_pascal}}Service {
+    /// List all {{name_snake}}.
+    pub async fn find_all(&self) -> Result<Vec<{{entity_pascal}}>, Error> {
+        // TODO: load from your data store.
+        Ok(Vec::new())
+    }
+
+    /// Find one {{entity_snake}} by id.
+    pub async fn find_by_id(&self, id: u64) -> Result<Option<{{entity_pascal}}>, Error> {
+        // TODO: load from your data store.
+        let _ = id;
+        Ok(None)
+    }
+{{#if crud}}
+
+    /// Create a {{entity_snake}}.
+    pub async fn create(&self, dto: Create{{entity_pascal}}Dto) -> Result<{{entity_pascal}}, Error> {
+        // TODO: persist and return the stored {{entity_snake}} (with its real id).
+        Ok({{entity_pascal}} { id: 1, name: dto.name })
+    }
+
+    /// Update a {{entity_snake}}; `None` if it does not exist.
+    pub async fn update(&self, id: u64, dto: Update{{entity_pascal}}Dto) -> Result<Option<{{entity_pascal}}>, Error> {
+        let Some(mut item) = self.find_by_id(id).await? else {
+            return Ok(None);
+        };
+        if let Some(name) = dto.name {
+            item.name = name;
+        }
+        // TODO: persist `item`.
+        Ok(Some(item))
+    }
+
+    /// Delete a {{entity_snake}}; `false` if it does not exist.
+    pub async fn delete(&self, id: u64) -> Result<bool, Error> {
+        let exists = self.find_by_id(id).await?.is_some();
+        // TODO: delete from your data store.
+        Ok(exists)
+    }
+{{/if}}
+}
+"#;
+
+const RESOURCE_CONTROLLER_TEST_TEMPLATE: &str = r#"//! Tests for `{{name_pascal}}Controller`.
+
+use armature::prelude::*;
+
+use super::super::{{name_snake}}_controller::{{name_pascal}}Controller;
+use super::super::{{name_snake}}_service::{{name_pascal}}Service;
+
+/// Build the controller the way the application does: through the
+/// dependency-injection container.
+fn controller() -> {{name_pascal}}Controller {
+    let container = Container::new();
+    container.register({{name_pascal}}Service::default());
+    {{name_pascal}}Controller::new_with_di(&container).expect("{{name_pascal}}Service is injectable")
+}
+
+fn request(method: &str, path: &str, id: Option<&str>) -> HttpRequest {
+    let mut req = HttpRequest::new(method, path.to_string());
+    if let Some(id) = id {
+        req.push_param("id", id.to_string());
+    }
+    req
+}
+
+#[tokio::test]
+async fn index_returns_200() {
+    let response = controller()
+        .index(request("GET", "/{{base_path}}", None))
+        .await
+        .unwrap();
+    assert_eq!(response.status, 200);
+}
+
+#[tokio::test]
+async fn show_unknown_id_is_not_found() {
+    let result = controller()
+        .show(request("GET", "/{{base_path}}/42", Some("42")))
+        .await;
+    assert!(matches!(result, Err(Error::NotFound(_))));
+}
+
+#[tokio::test]
+async fn show_rejects_an_invalid_id() {
+    let result = controller()
+        .show(request("GET", "/{{base_path}}/abc", Some("abc")))
+        .await;
+    assert!(matches!(result, Err(Error::BadRequest(_))));
+}
+{{#if crud}}
+
+#[tokio::test]
+async fn create_returns_201() {
+    let mut req = request("POST", "/{{base_path}}", None);
+    req.set_body(b"{\"name\":\"example\"}".to_vec());
+    let response = controller().create(req).await.unwrap();
+    assert_eq!(response.status, 201);
+}
+
+#[tokio::test]
+async fn create_rejects_an_invalid_body() {
+    let mut req = request("POST", "/{{base_path}}", None);
+    req.set_body(b"not json".to_vec());
+    assert!(controller().create(req).await.is_err());
+}
+
+#[tokio::test]
+async fn update_unknown_id_is_not_found() {
+    let mut req = request("PUT", "/{{base_path}}/42", Some("42"));
+    req.set_body(b"{\"name\":\"renamed\"}".to_vec());
+    let result = controller().update(req).await;
+    assert!(matches!(result, Err(Error::NotFound(_))));
+}
+
+#[tokio::test]
+async fn destroy_unknown_id_is_not_found() {
+    let result = controller()
+        .destroy(request("DELETE", "/{{base_path}}/42", Some("42")))
+        .await;
+    assert!(matches!(result, Err(Error::NotFound(_))));
+}
+{{/if}}
+"#;
+
+const RESOURCE_SERVICE_TEST_TEMPLATE: &str = r#"//! Tests for `{{name_pascal}}Service`.
+
+{{#if crud}}
+use super::super::{{name_snake}}_service::{Create{{entity_pascal}}Dto, {{name_pascal}}Service, Update{{entity_pascal}}Dto};
+{{else}}
+use super::super::{{name_snake}}_service::{{name_pascal}}Service;
+{{/if}}
+
+#[tokio::test]
+async fn find_all_starts_empty() {
+    let service = {{name_pascal}}Service::default();
+    assert!(service.find_all().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn find_by_id_unknown_is_none() {
+    let service = {{name_pascal}}Service::default();
+    assert_eq!(service.find_by_id(42).await.unwrap(), None);
+}
+{{#if crud}}
+
+#[tokio::test]
+async fn create_returns_the_new_{{entity_snake}}() {
+    let service = {{name_pascal}}Service::default();
+    let created = service
+        .create(Create{{entity_pascal}}Dto {
+            name: "example".to_string(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(created.name, "example");
+}
+
+#[tokio::test]
+async fn update_unknown_is_none() {
+    let service = {{name_pascal}}Service::default();
+    let updated = service
+        .update(42, Update{{entity_pascal}}Dto::default())
+        .await
+        .unwrap();
+    assert_eq!(updated, None);
+}
+
+#[tokio::test]
+async fn delete_unknown_is_false() {
+    let service = {{name_pascal}}Service::default();
+    assert!(!service.delete(42).await.unwrap());
+}
+{{/if}}
+"#;
+
+// =============================================================================
+// NESTJS SCHEMATIC EQUIVALENTS (class, interface, provider, decorator, library)
+// =============================================================================
+
+const CLASS_TEMPLATE: &str = r#"//! {{name_pascal}}.
+
+/// {{name_pascal}}.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct {{name_pascal}} {}
+
+impl {{name_pascal}} {
+    /// Create a new `{{name_pascal}}`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+"#;
+
+const CLASS_TEST_TEMPLATE: &str = r#"//! Tests for `{{name_pascal}}`.
+
+use super::*;
+
+#[test]
+fn {{name_snake}}_can_be_created() {
+    assert_eq!({{name_pascal}}::new(), {{name_pascal}}::default());
+}
+"#;
+
+const INTERFACE_TEMPLATE: &str = r#"//! {{name_pascal}} interface.
+
+/// {{name_pascal}} contract (a NestJS `interface` is a Rust trait).
+///
+/// Implement it for the types that provide it:
+///
+/// ```ignore
+/// impl {{name_pascal}} for MyType {}
+/// ```
+pub trait {{name_pascal}}: Send + Sync {
+    // Declare the methods of the contract here, e.g.:
+    // fn id(&self) -> u64;
+}
+"#;
+
+const PROVIDER_TEMPLATE: &str = r#"//! {{name_pascal}} provider.
+
+use armature::prelude::*;
+
+/// {{name_pascal}} provider. Registered in the nearest module, it can be
+/// injected into controllers and other providers by declaring a field of
+/// this type.
+#[derive(Clone, Default)]
+#[injectable]
+pub struct {{name_pascal}}Provider {}
+"#;
+
+const PROVIDER_TEST_TEMPLATE: &str = r#"//! Tests for `{{name_pascal}}Provider`.
+
+use super::*;
+
+#[test]
+fn {{name_snake}}_provider_resolves_from_the_container() {
+    let container = Container::new();
+    container.register({{name_pascal}}Provider::default());
+    assert!(container.resolve::<{{name_pascal}}Provider>().is_ok());
+}
+"#;
+
+const DECORATOR_TEMPLATE: &str = r#"//! {{name_pascal}} decorator.
+//!
+//! Rust has no runtime decorators: the NestJS `createParamDecorator`
+//! equivalent is a request extractor. Use it in a handler with
+//! `let value = {{name_pascal}}::from_request(&req)?;`.
+
+use armature::prelude::*;
+
+/// Value of the `x-{{name_kebab}}` request header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct {{name_pascal}}(pub String);
+
+impl FromRequest for {{name_pascal}} {
+    fn from_request(request: &HttpRequest) -> Result<Self, Error> {
+        request
+            .headers
+            .get("x-{{name_kebab}}")
+            .map(|value| Self(value.to_string()))
+            .ok_or_else(|| Error::BadRequest("missing x-{{name_kebab}} header".to_string()))
+    }
+}
+"#;
+
+const DECORATOR_TEST_TEMPLATE: &str = r#"//! Tests for the `{{name_pascal}}` extractor.
+
+use super::*;
+
+#[test]
+fn extracts_the_header() {
+    let mut req = HttpRequest::new("GET", "/".to_string());
+    req.headers.insert("x-{{name_kebab}}", "value");
+    assert_eq!(
+        {{name_pascal}}::from_request(&req).unwrap(),
+        {{name_pascal}}("value".to_string())
+    );
+}
+
+#[test]
+fn rejects_a_request_without_the_header() {
+    let req = HttpRequest::new("GET", "/".to_string());
+    assert!(matches!(
+        {{name_pascal}}::from_request(&req),
+        Err(Error::BadRequest(_))
+    ));
+}
+"#;
+
+const LIBRARY_CARGO_TOML_TEMPLATE: &str = r#"[package]
+name = "{{name_kebab}}"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+{{{dependencies}}}"#;
+
+const LIBRARY_LIB_TEMPLATE: &str = r#"//! `{{name_kebab}}` library, shared by the applications of the workspace.
+//!
+//! Generated by `armature generate library {{name_kebab}}`. Import the module
+//! in an application: `#[module(imports: [{{name_snake}}::{{name_pascal}}Module])]`.
+
+use armature::prelude::*;
+
+/// Service exported by the library.
+#[derive(Clone, Default)]
+#[injectable]
+pub struct {{name_pascal}}Service {}
+
+impl {{name_pascal}}Service {
+    /// Example method — replace with the library's API.
+    pub fn name(&self) -> &'static str {
+        "{{name_kebab}}"
+    }
+}
+
+/// Module of the library.
+#[module(providers: [{{name_pascal}}Service])]
+#[derive(Default)]
+pub struct {{name_pascal}}Module;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_works() {
+        assert_eq!({{name_pascal}}Service::default().name(), "{{name_kebab}}");
+    }
+}
 "#;
 
 // =============================================================================
@@ -360,15 +847,14 @@ pub struct {{name_pascal}}Module;
 const MIDDLEWARE_TEMPLATE: &str = r#"//! {{name_pascal}} middleware.
 
 use armature::prelude::*;
+use armature::{Middleware, Next};
 use async_trait::async_trait;
 
 /// {{name_pascal}} middleware.
 ///
 /// # Example
 ///
-/// ```rust
-/// use armature::prelude::*;
-///
+/// ```ignore
 /// let middleware = {{name_pascal}}Middleware::new();
 /// ```
 pub struct {{name_pascal}}Middleware {
@@ -392,7 +878,7 @@ impl Default for {{name_pascal}}Middleware {
 impl Middleware for {{name_pascal}}Middleware {
     async fn handle(&self, req: HttpRequest, next: Next) -> Result<HttpResponse, Error> {
         // Pre-processing: Add logic before the request is handled
-        tracing::debug!("{{name_pascal}}Middleware: Processing request to {}", req.path);
+        tracing::debug!("{{name_pascal}}Middleware: Processing request to {}", req.path_only());
 
         // Call the next middleware/handler
         let response = next(req).await?;
@@ -833,7 +1319,6 @@ impl Guard for {{name_pascal}}Guard {
 const SERVICE_TEMPLATE: &str = r#"//! {{name_pascal}} service.
 
 use armature::prelude::*;
-use std::sync::Arc;
 
 /// {{name_pascal}} service provides business logic for {{name_snake}} operations.
 ///
@@ -1069,7 +1554,7 @@ cargo build --release
 const REPOSITORY_TEMPLATE: &str = r#"//! {{name_pascal}} repository.
 
 use armature::prelude::*;
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
 
 /// {{name_pascal}} entity type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1632,94 +2117,45 @@ mod tests {
 // JOB/WORKER TEMPLATES
 // =============================================================================
 
-const JOB_TEMPLATE: &str = r#"//! {{name_pascal}} background job.
+const JOB_TEMPLATE: &str = r#"//! {{name_pascal}} job: background processing with armature-queue.
+//!
+//! Enqueue: `queue.enqueue_job({{name_pascal}}Job::job(&payload)?).await?;`
+//! Process: `worker.register_handler(JOB_TYPE, {{name_pascal}}Job::handle).await;`
 
-use armature::prelude::*;
-use armature_queue::{Job, JobContext, JobResult, Processor};
-use async_trait::async_trait;
+use armature_queue::{Job, QueueError, QueueResult};
 use serde::{Deserialize, Serialize};
 
-/// {{name_pascal}} job payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Queue the job is pushed to.
+pub const QUEUE: &str = "{{name_kebab}}";
+/// Job type the worker dispatches on.
+pub const JOB_TYPE: &str = "{{name_snake}}";
+
+/// Data carried by a `{{name_snake}}` job.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct {{name_pascal}}Payload {
-    pub id: u64,
-    // Add more fields as needed
+    pub id: String,
 }
 
-/// {{name_pascal}} job processor.
-#[derive(Clone)]
+/// {{name_pascal}} job. Delivery is at-least-once: keep `handle` idempotent.
 pub struct {{name_pascal}}Job;
 
 impl {{name_pascal}}Job {
-    /// Create a new job processor.
-    pub fn new() -> Self {
-        Self
+    /// Build the job to enqueue.
+    pub fn job(payload: &{{name_pascal}}Payload) -> QueueResult<Job> {
+        let data = serde_json::to_value(payload)
+            .map_err(|e| QueueError::Serialization(e.to_string()))?;
+        Ok(Job::new(QUEUE, JOB_TYPE, data))
     }
 
-    /// Queue name for this job.
-    pub const QUEUE: &'static str = "{{name_snake}}";
-}
+    /// Process one job.
+    pub async fn handle(job: Job) -> QueueResult<()> {
+        let payload: {{name_pascal}}Payload = serde_json::from_value(job.data)
+            .map_err(|e| QueueError::Deserialization(e.to_string()))?;
 
-impl Default for {{name_pascal}}Job {
-    fn default() -> Self {
-        Self::new()
+        tracing::info!("{{name_pascal}}Job: processing {}", payload.id);
+        // TODO: do the work here.
+        Ok(())
     }
-}
-
-#[async_trait]
-impl Processor for {{name_pascal}}Job {
-    type Payload = {{name_pascal}}Payload;
-
-    fn queue(&self) -> &str {
-        Self::QUEUE
-    }
-
-    async fn process(&self, ctx: JobContext, payload: Self::Payload) -> JobResult {
-        tracing::info!(
-            "Processing {{name_pascal}}Job: id={}, attempt={}",
-            payload.id,
-            ctx.attempt
-        );
-
-        // TODO: Implement job logic
-        // Example: Send email, process data, etc.
-
-        // Simulate work
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        tracing::info!("{{name_pascal}}Job completed: id={}", payload.id);
-
-        JobResult::Success
-    }
-
-    fn max_retries(&self) -> u32 {
-        3
-    }
-
-    fn retry_delay(&self, attempt: u32) -> std::time::Duration {
-        // Exponential backoff
-        std::time::Duration::from_secs(2u64.pow(attempt))
-    }
-
-    async fn on_failure(&self, ctx: JobContext, payload: Self::Payload, error: &str) {
-        tracing::error!(
-            "{{name_pascal}}Job failed: id={}, error={}",
-            payload.id,
-            error
-        );
-        // TODO: Handle failure (send alert, log to dead letter queue, etc.)
-    }
-}
-
-/// Helper function to enqueue a {{name_snake}} job.
-pub async fn enqueue_{{name_snake}}_job(
-    queue: &armature_queue::Queue,
-    payload: {{name_pascal}}Payload,
-) -> Result<String, Error> {
-    queue
-        .enqueue({{name_pascal}}Job::QUEUE, payload)
-        .await
-        .map_err(|e| Error::Internal(e.to_string()))
 }
 "#;
 
@@ -1732,21 +2168,18 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_job_processing() {
-        let job = {{name_pascal}}Job::new();
-        let payload = {{name_pascal}}Payload { id: 1 };
-        let ctx = JobContext { attempt: 1, job_id: "test".to_string() };
-
-        let result = job.process(ctx, payload).await;
-        assert!(matches!(result, JobResult::Success));
+    async fn round_trips_the_payload() {
+        let payload = {{name_pascal}}Payload { id: "42".to_string() };
+        let job = {{name_pascal}}Job::job(&payload).unwrap();
+        assert_eq!(job.queue, QUEUE);
+        assert_eq!(job.job_type, JOB_TYPE);
+        assert!({{name_pascal}}Job::handle(job).await.is_ok());
     }
 
-    #[test]
-    fn test_retry_delay() {
-        let job = {{name_pascal}}Job::new();
-        assert_eq!(job.retry_delay(1), std::time::Duration::from_secs(2));
-        assert_eq!(job.retry_delay(2), std::time::Duration::from_secs(4));
-        assert_eq!(job.retry_delay(3), std::time::Duration::from_secs(8));
+    #[tokio::test]
+    async fn rejects_invalid_data() {
+        let job = Job::new(QUEUE, JOB_TYPE, serde_json::json!({"unexpected": true}));
+        assert!({{name_pascal}}Job::handle(job).await.is_err());
     }
 }
 "#;
@@ -1870,88 +2303,75 @@ impl Default for {{name_pascal}}Job {
 // EVENT HANDLER TEMPLATES
 // =============================================================================
 
-const EVENT_HANDLER_TEMPLATE: &str = r#"//! {{name_pascal}} event handler.
+const EVENT_HANDLER_TEMPLATE: &str = r#"//! {{name_pascal}} event and its handler (armature-events).
+//!
+//! Subscribe: `bus.subscribe::<{{name_pascal}}Event, _>({{name_pascal}}Handler);`
+//! Publish: `bus.publish({{name_pascal}}Event::new("42")).await?;`
 
-use armature::prelude::*;
-use armature_events::{Event, EventHandler, EventBus};
+use armature_events::{Event, EventHandler, EventHandlerError, EventMetadata};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::any::Any;
+use uuid::Uuid;
 
-/// {{name_pascal}} event types.
+/// {{name_pascal}} event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum {{name_pascal}}Event {
-    Created { id: u64 },
-    Updated { id: u64 },
-    Deleted { id: u64 },
+pub struct {{name_pascal}}Event {
+    pub metadata: EventMetadata,
+    /// Identifier of the subject of the event.
+    pub subject_id: String,
+}
+
+impl {{name_pascal}}Event {
+    /// Event name.
+    pub const NAME: &'static str = "{{name_snake}}";
+
+    pub fn new(subject_id: impl Into<String>) -> Self {
+        Self {
+            metadata: EventMetadata::new(Self::NAME),
+            subject_id: subject_id.into(),
+        }
+    }
 }
 
 impl Event for {{name_pascal}}Event {
-    fn event_type(&self) -> &str {
-        match self {
-            Self::Created { .. } => "{{name_snake}}.created",
-            Self::Updated { .. } => "{{name_snake}}.updated",
-            Self::Deleted { .. } => "{{name_snake}}.deleted",
-        }
+    fn event_name(&self) -> &str {
+        &self.metadata.name
+    }
+
+    fn event_id(&self) -> Uuid {
+        self.metadata.id
+    }
+
+    fn timestamp(&self) -> DateTime<Utc> {
+        self.metadata.timestamp
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_event(&self) -> Box<dyn Event> {
+        Box::new(self.clone())
     }
 }
 
-/// Handler for {{name_pascal}} created events.
-#[derive(Clone)]
-pub struct On{{name_pascal}}Created;
+/// Handles [`{{name_pascal}}Event`].
+#[derive(Clone, Default)]
+pub struct {{name_pascal}}Handler;
 
 #[async_trait]
-impl EventHandler<{{name_pascal}}Event> for On{{name_pascal}}Created {
-    async fn handle(&self, event: {{name_pascal}}Event) -> Result<(), Error> {
-        if let {{name_pascal}}Event::Created { id } = event {
-            tracing::info!("{{name_pascal}} created: id={}", id);
-            // TODO: Implement handler logic
-            // Example: Send notification, update cache, etc.
-        }
+impl EventHandler<{{name_pascal}}Event> for {{name_pascal}}Handler {
+    async fn handle(&self, event: &{{name_pascal}}Event) -> Result<(), EventHandlerError> {
+        tracing::info!("{} for {}", event.event_name(), event.subject_id);
+        // TODO: react to the event here.
         Ok(())
     }
-}
-
-/// Handler for {{name_pascal}} updated events.
-#[derive(Clone)]
-pub struct On{{name_pascal}}Updated;
-
-#[async_trait]
-impl EventHandler<{{name_pascal}}Event> for On{{name_pascal}}Updated {
-    async fn handle(&self, event: {{name_pascal}}Event) -> Result<(), Error> {
-        if let {{name_pascal}}Event::Updated { id } = event {
-            tracing::info!("{{name_pascal}} updated: id={}", id);
-            // TODO: Implement handler logic
-        }
-        Ok(())
-    }
-}
-
-/// Handler for {{name_pascal}} deleted events.
-#[derive(Clone)]
-pub struct On{{name_pascal}}Deleted;
-
-#[async_trait]
-impl EventHandler<{{name_pascal}}Event> for On{{name_pascal}}Deleted {
-    async fn handle(&self, event: {{name_pascal}}Event) -> Result<(), Error> {
-        if let {{name_pascal}}Event::Deleted { id } = event {
-            tracing::info!("{{name_pascal}} deleted: id={}", id);
-            // TODO: Implement handler logic
-        }
-        Ok(())
-    }
-}
-
-/// Register all {{name_snake}} event handlers.
-pub fn register_{{name_snake}}_handlers(bus: &EventBus) {
-    bus.subscribe(Arc::new(On{{name_pascal}}Created));
-    bus.subscribe(Arc::new(On{{name_pascal}}Updated));
-    bus.subscribe(Arc::new(On{{name_pascal}}Deleted));
 }
 "#;
 
-const EVENT_HANDLER_TEST_TEMPLATE: &str = r#"//! Tests for {{name_pascal}} event handlers.
+const EVENT_HANDLER_TEST_TEMPLATE: &str = r#"//! Tests for {{name_pascal}}Event.
 
 use super::*;
 
@@ -1960,27 +2380,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_on_created_handler() {
-        let handler = On{{name_pascal}}Created;
-        let event = {{name_pascal}}Event::Created { id: 1 };
-        let result = handler.handle(event).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_on_updated_handler() {
-        let handler = On{{name_pascal}}Updated;
-        let event = {{name_pascal}}Event::Updated { id: 1 };
-        let result = handler.handle(event).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_on_deleted_handler() {
-        let handler = On{{name_pascal}}Deleted;
-        let event = {{name_pascal}}Event::Deleted { id: 1 };
-        let result = handler.handle(event).await;
-        assert!(result.is_ok());
+    async fn handler_accepts_the_event() {
+        let event = {{name_pascal}}Event::new("42");
+        assert_eq!(event.event_name(), {{name_pascal}}Event::NAME);
+        assert!({{name_pascal}}Handler.handle(&event).await.is_ok());
     }
 }
 "#;
@@ -1992,71 +2395,40 @@ mod tests {
 const INTERCEPTOR_TEMPLATE: &str = r#"//! {{name_pascal}} interceptor.
 
 use armature::prelude::*;
+use armature::{ExecutionContext, Interceptor};
 use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Instant;
 
-/// {{name_pascal}} interceptor for request/response transformation.
-///
-/// # Example
-///
-/// ```rust
-/// use armature::prelude::*;
-///
-/// let interceptor = {{name_pascal}}Interceptor::new();
-/// ```
+/// {{name_pascal}} interceptor: runs around the handler, can transform the
+/// request before it and the response after it.
+#[derive(Default)]
 pub struct {{name_pascal}}Interceptor {
     // Add configuration fields here
 }
 
-impl {{name_pascal}}Interceptor {
-    /// Create a new interceptor instance.
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for {{name_pascal}}Interceptor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[async_trait]
 impl Interceptor for {{name_pascal}}Interceptor {
-    /// Called before the handler executes.
-    async fn before(&self, req: &mut HttpRequest) -> Result<(), Error> {
-        // Store request start time for timing
-        req.extensions.insert(Instant::now());
+    async fn intercept(
+        &self,
+        context: ExecutionContext,
+        next: Pin<Box<dyn Future<Output = Result<HttpResponse, Error>> + Send>>,
+    ) -> Result<HttpResponse, Error> {
+        // Before the handler.
+        let path = context.request.path_only().to_string();
+        let start = Instant::now();
 
-        tracing::debug!("{{name_pascal}}Interceptor: Before handler for {}", req.path);
+        let mut response = next.await?;
 
-        // TODO: Add pre-processing logic
-        // Example: Transform request body, add headers, etc.
-
-        Ok(())
-    }
-
-    /// Called after the handler executes.
-    async fn after(&self, req: &HttpRequest, res: &mut HttpResponse) -> Result<(), Error> {
-        // Calculate request duration
-        if let Some(start) = req.extensions.get::<Instant>() {
-            let duration = start.elapsed();
-            res.headers.insert(
-                "X-Response-Time".to_string(),
-                format!("{}ms", duration.as_millis()),
-            );
-        }
-
-        tracing::debug!(
-            "{{name_pascal}}Interceptor: After handler for {}, status={}",
-            req.path,
-            res.status
+        // After the handler.
+        let elapsed = start.elapsed();
+        response.headers.insert(
+            "X-Response-Time".to_string(),
+            format!("{}ms", elapsed.as_millis()),
         );
-
-        // TODO: Add post-processing logic
-        // Example: Transform response body, add headers, etc.
-
-        Ok(())
+        tracing::debug!("{{name_pascal}}Interceptor: {} took {:?}", path, elapsed);
+        Ok(response)
     }
 }
 "#;
@@ -2070,22 +2442,14 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_interceptor_before() {
-        let interceptor = {{name_pascal}}Interceptor::new();
-        let mut req = HttpRequest::new("GET", "/test");
+    async fn adds_the_response_time_header() {
+        let interceptor = {{name_pascal}}Interceptor::default();
+        let context = ExecutionContext::new(HttpRequest::new("GET", "/test"));
+        let next = Box::pin(async { Ok(HttpResponse::ok()) });
 
-        let result = interceptor.before(&mut req).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_interceptor_after() {
-        let interceptor = {{name_pascal}}Interceptor::new();
-        let req = HttpRequest::new("GET", "/test");
-        let mut res = HttpResponse::ok();
-
-        let result = interceptor.after(&req, &mut res).await;
-        assert!(result.is_ok());
+        let response = interceptor.intercept(context, next).await.unwrap();
+        assert_eq!(response.status, 200);
+        assert!(response.headers.get("X-Response-Time").is_some());
     }
 }
 "#;
@@ -2097,13 +2461,12 @@ mod tests {
 const PIPE_TEMPLATE: &str = r#"//! {{name_pascal}} validation pipe.
 
 use armature::prelude::*;
-use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use validator::Validate;
 
-/// {{name_pascal}} validation pipe.
+/// {{name_pascal}} validation pipe: parses the JSON body and validates it.
 ///
-/// Validates incoming request data against defined rules.
+/// Use it in a handler: `let input: CreateUser = {{name_pascal}}Pipe::new().transform(&req)?;`
 pub struct {{name_pascal}}Pipe<T> {
     _marker: std::marker::PhantomData<T>,
 }
@@ -2123,12 +2486,12 @@ impl<T> Default for {{name_pascal}}Pipe<T> {
     }
 }
 
-#[async_trait]
-impl<T> Pipe<T> for {{name_pascal}}Pipe<T>
+impl<T> {{name_pascal}}Pipe<T>
 where
-    T: DeserializeOwned + Validate + Send + Sync,
+    T: DeserializeOwned + Validate,
 {
-    async fn transform(&self, req: &HttpRequest) -> Result<T, Error> {
+    /// Parse and validate the request body.
+    pub fn transform(&self, req: &HttpRequest) -> Result<T, Error> {
         // Parse request body
         let value: T = serde_json::from_slice(&req.body)
             .map_err(|e| Error::BadRequest(format!("Invalid JSON: {}", e)))?;
@@ -2193,23 +2556,23 @@ struct TestInput {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_valid_input() {
+    #[test]
+    fn test_valid_input() {
         let pipe = {{name_pascal}}Pipe::<TestInput>::new();
         let mut req = HttpRequest::new("POST", "/test");
         req.set_body(r#"{"name": "test"}"#.as_bytes().to_vec());
 
-        let result = pipe.transform(&req).await;
+        let result = pipe.transform(&req);
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_invalid_input() {
+    #[test]
+    fn test_invalid_input() {
         let pipe = {{name_pascal}}Pipe::<TestInput>::new();
         let mut req = HttpRequest::new("POST", "/test");
         req.set_body(r#"{"name": ""}"#.as_bytes().to_vec());
 
-        let result = pipe.transform(&req).await;
+        let result = pipe.transform(&req);
         assert!(result.is_err());
     }
 
@@ -2235,6 +2598,7 @@ mod tests {
 
 const EXCEPTION_FILTER_TEMPLATE: &str = r#"//! {{name_pascal}} exception filter.
 
+use armature::exception_filter::{ExceptionContext, ExceptionFilter};
 use armature::prelude::*;
 use async_trait::async_trait;
 use serde::Serialize;
@@ -2248,47 +2612,36 @@ pub struct ErrorResponse {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
-    pub timestamp: String,
+    /// Seconds since the Unix epoch.
+    pub timestamp: u64,
     pub path: String,
 }
 
-/// {{name_pascal}} exception filter.
-///
-/// Catches exceptions and transforms them into standardized error responses.
+/// {{name_pascal}} exception filter: turns errors into JSON error responses.
+#[derive(Default)]
 pub struct {{name_pascal}}ExceptionFilter;
-
-impl {{name_pascal}}ExceptionFilter {
-    /// Create a new exception filter.
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for {{name_pascal}}ExceptionFilter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[async_trait]
 impl ExceptionFilter for {{name_pascal}}ExceptionFilter {
-    async fn catch(&self, error: Error, req: &HttpRequest) -> HttpResponse {
-        let (status_code, error_type, message) = match &error {
-            Error::NotFound(msg) => (404, "Not Found", msg.clone()),
-            Error::BadRequest(msg) => (400, "Bad Request", msg.clone()),
-            Error::Unauthorized(msg) => (401, "Unauthorized", msg.clone()),
-            Error::Forbidden(msg) => (403, "Forbidden", msg.clone()),
-            Error::Validation(msg) => (422, "Validation Error", msg.clone()),
-            Error::Conflict(msg) => (409, "Conflict", msg.clone()),
-            Error::Internal(msg) => (500, "Internal Server Error", msg.clone()),
-            _ => (500, "Internal Server Error", "An unexpected error occurred".to_string()),
+    async fn catch(&self, error: &Error, ctx: &ExceptionContext) -> Option<HttpResponse> {
+        let req = &ctx.request;
+        let status_code = error.status_code();
+        let (error_type, message) = match error {
+            Error::NotFound(msg) => ("Not Found", msg.clone()),
+            Error::BadRequest(msg) => ("Bad Request", msg.clone()),
+            Error::Unauthorized(msg) => ("Unauthorized", msg.clone()),
+            Error::Forbidden(msg) => ("Forbidden", msg.clone()),
+            Error::Validation(msg) => ("Validation Error", msg.clone()),
+            Error::Conflict(msg) => ("Conflict", msg.clone()),
+            // Internal details are logged, never sent to the client.
+            _ => ("Internal Server Error", "An unexpected error occurred".to_string()),
         };
 
         tracing::error!(
             "{{name_pascal}}ExceptionFilter: {} - {} - {}",
             status_code,
             error_type,
-            message
+            error
         );
 
         let error_response = ErrorResponse {
@@ -2296,7 +2649,10 @@ impl ExceptionFilter for {{name_pascal}}ExceptionFilter {
             error: error_type.to_string(),
             message,
             details: None,
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or_default(),
             // `req.path` is the raw target; the routing path keeps query
             // strings (which may carry tokens) out of the error body.
             path: req.path_only().to_string(),
@@ -2304,9 +2660,11 @@ impl ExceptionFilter for {{name_pascal}}ExceptionFilter {
 
         let body = serde_json::to_vec(&error_response).unwrap_or_default();
 
-        HttpResponse::new(status_code)
-            .with_header("Content-Type".to_string(), "application/json".to_string())
-            .with_body(body)
+        Some(
+            HttpResponse::new(status_code)
+                .with_header("Content-Type".to_string(), "application/json".to_string())
+                .with_body(body),
+        )
     }
 }
 "#;
@@ -2319,34 +2677,29 @@ use super::*;
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_not_found_error() {
-        let filter = {{name_pascal}}ExceptionFilter::new();
-        let error = Error::NotFound("Resource not found".to_string());
-        let req = HttpRequest::new("GET", "/test");
-
-        let response = filter.catch(error, &req).await;
-        assert_eq!(response.status, 404);
+    async fn status_for(error: Error) -> u16 {
+        let filter = {{name_pascal}}ExceptionFilter;
+        let ctx = ExceptionContext::from_request(HttpRequest::new("GET", "/test?token=secret"));
+        filter.catch(&error, &ctx).await.unwrap().status
     }
 
     #[tokio::test]
-    async fn test_bad_request_error() {
-        let filter = {{name_pascal}}ExceptionFilter::new();
-        let error = Error::BadRequest("Invalid input".to_string());
-        let req = HttpRequest::new("GET", "/test");
-
-        let response = filter.catch(error, &req).await;
-        assert_eq!(response.status, 400);
+    async fn maps_errors_to_statuses() {
+        assert_eq!(status_for(Error::NotFound("x".to_string())).await, 404);
+        assert_eq!(status_for(Error::BadRequest("x".to_string())).await, 400);
+        assert_eq!(status_for(Error::Internal("x".to_string())).await, 500);
     }
 
     #[tokio::test]
-    async fn test_internal_error() {
-        let filter = {{name_pascal}}ExceptionFilter::new();
-        let error = Error::Internal("Something went wrong".to_string());
-        let req = HttpRequest::new("GET", "/test");
-
-        let response = filter.catch(error, &req).await;
-        assert_eq!(response.status, 500);
+    async fn error_body_has_no_query_string() {
+        let filter = {{name_pascal}}ExceptionFilter;
+        let ctx = ExceptionContext::from_request(HttpRequest::new("GET", "/test?token=secret"));
+        let response = filter
+            .catch(&Error::NotFound("x".to_string()), &ctx)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["path"], "/test");
     }
 }
 "#;
@@ -2482,6 +2835,9 @@ impl {{name_pascal}}ConfigBuilder {
 // =============================================================================
 
 const ENTITY_TEMPLATE: &str = r#"//! {{name_pascal}} database entity.
+// The Diesel / SeaORM variants are enabled by `diesel` / `sea-orm` features
+// of your crate; until you declare them, rustc would warn about each `cfg`.
+#![allow(unexpected_cfgs)]
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -2689,7 +3045,7 @@ use armature::prelude::*;
 use prax_armature::PraxClient;
 use std::sync::Arc;
 
-use crate::entities::{{name_snake}}::{
+use super::{{name_snake}}_entity::{
     {{name_pascal}}, Create{{name_pascal}}Input, Update{{name_pascal}}Input, {{name_pascal}}Filter,
 };
 
@@ -3779,229 +4135,71 @@ mod tests {
 // SCHEDULER TEMPLATES
 // =============================================================================
 
-const SCHEDULER_TEMPLATE: &str = r#"//! {{name_pascal}} scheduled task.
-
-use armature::prelude::*;
-use armature_cron::{Cron, CronSchedule, Task};
-use async_trait::async_trait;
-
-/// {{name_pascal}} scheduled task.
-///
-/// Runs according to the configured cron schedule.
-pub struct {{name_pascal}}Task {
-    schedule: CronSchedule,
-}
-
-impl {{name_pascal}}Task {
-    /// Create a new scheduled task.
-    ///
-    /// # Arguments
-    ///
-    /// * `cron_expr` - Cron expression (e.g., "0 */5 * * * *" for every 5 minutes)
-    pub fn new(cron_expr: &str) -> Result<Self, Error> {
-        let schedule = CronSchedule::parse(cron_expr)
-            .map_err(|e| Error::Config(format!("Invalid cron expression: {}", e)))?;
-
-        Ok(Self { schedule })
-    }
-
-    /// Create a task that runs every minute.
-    pub fn every_minute() -> Result<Self, Error> {
-        Self::new("0 * * * * *")
-    }
-
-    /// Create a task that runs every 5 minutes.
-    pub fn every_5_minutes() -> Result<Self, Error> {
-        Self::new("0 */5 * * * *")
-    }
-
-    /// Create a task that runs every hour.
-    pub fn hourly() -> Result<Self, Error> {
-        Self::new("0 0 * * * *")
-    }
-
-    /// Create a task that runs daily at midnight.
-    pub fn daily() -> Result<Self, Error> {
-        Self::new("0 0 0 * * *")
-    }
-
-    /// Create a task that runs weekly on Sunday at midnight.
-    pub fn weekly() -> Result<Self, Error> {
-        Self::new("0 0 0 * * 0")
-    }
-}
-
-#[async_trait]
-impl Task for {{name_pascal}}Task {
-    fn name(&self) -> &str {
-        "{{name_snake}}_task"
-    }
-
-    fn schedule(&self) -> &CronSchedule {
-        &self.schedule
-    }
-
-    async fn run(&self) -> Result<(), Error> {
-        tracing::info!("{{name_pascal}}Task: Starting execution");
-        let start = std::time::Instant::now();
-
-        // TODO: Implement your scheduled task logic here
-        // Examples:
-        // - Clean up old records
-        // - Send scheduled notifications
-        // - Generate reports
-        // - Sync data with external services
-
-        let duration = start.elapsed();
-        tracing::info!(
-            "{{name_pascal}}Task: Completed in {:?}",
-            duration
-        );
-
-        Ok(())
-    }
-
-    async fn on_error(&self, error: Error) {
-        tracing::error!("{{name_pascal}}Task failed: {}", error);
-        // TODO: Handle error (send alert, retry logic, etc.)
-    }
-}
-"#;
-
-const SCHEDULER_TEST_TEMPLATE: &str = r#"//! Tests for {{name_pascal}}Task.
-
-use super::*;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cron_parsing() {
-        let task = {{name_pascal}}Task::every_minute();
-        assert!(task.is_ok());
-
-        let task = {{name_pascal}}Task::every_5_minutes();
-        assert!(task.is_ok());
-
-        let task = {{name_pascal}}Task::hourly();
-        assert!(task.is_ok());
-
-        let task = {{name_pascal}}Task::daily();
-        assert!(task.is_ok());
-
-        let task = {{name_pascal}}Task::weekly();
-        assert!(task.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_task_execution() {
-        let task = {{name_pascal}}Task::every_minute().expect("Failed to create task");
-        let result = task.run().await;
-        assert!(result.is_ok());
-    }
-}
-"#;
-
 // =============================================================================
 // CACHE SERVICE TEMPLATES
 // =============================================================================
 
-const CACHE_SERVICE_TEMPLATE: &str = r#"//! {{name_pascal}} cache service.
+const CACHE_SERVICE_TEMPLATE: &str = r#"//! {{name_pascal}} cache service (armature-cache).
 
-use armature::prelude::*;
-use armature_cache::{Cache, CacheConfig, CacheKey};
-use serde::{de::DeserializeOwned, Serialize};
+use armature_cache::{CacheError, CacheResult, CacheStore, InMemoryCache};
+use serde::{Serialize, de::DeserializeOwned};
+use std::sync::Arc;
 use std::time::Duration;
 
-/// {{name_pascal}} cache service.
+/// Typed cache for {{name_snake}} data; keys are prefixed with `{{name_snake}}:`.
 ///
-/// Provides caching functionality for {{name_snake}} data.
+/// `in_memory()` keeps entries in the process; pass another store (e.g.
+/// `armature_cache::RedisCache`, `redis` feature) to `new` in production.
 #[derive(Clone)]
-#[injectable]
 pub struct {{name_pascal}}CacheService {
-    cache: Cache,
-    prefix: String,
-    default_ttl: Duration,
+    store: Arc<dyn CacheStore>,
+    ttl: Duration,
 }
 
 impl {{name_pascal}}CacheService {
-    /// Create a new cache service.
-    pub async fn new(config: CacheConfig) -> Result<Self, Error> {
-        let cache = Cache::new(config).await?;
-
-        Ok(Self {
-            cache,
-            prefix: "{{name_snake}}".to_string(),
-            default_ttl: Duration::from_secs(300), // 5 minutes
-        })
-    }
-
-    /// Build a cache key with the service prefix.
-    fn key(&self, id: &str) -> String {
-        format!("{}:{}", self.prefix, id)
-    }
-
-    /// Get a value from cache.
-    pub async fn get<T: DeserializeOwned>(&self, id: &str) -> Result<Option<T>, Error> {
-        self.cache.get(&self.key(id)).await
-    }
-
-    /// Set a value in cache with default TTL.
-    pub async fn set<T: Serialize + Send + Sync>(
-        &self,
-        id: &str,
-        value: &T,
-    ) -> Result<(), Error> {
-        self.cache.set(&self.key(id), value, self.default_ttl).await
-    }
-
-    /// Set a value in cache with custom TTL.
-    pub async fn set_with_ttl<T: Serialize + Send + Sync>(
-        &self,
-        id: &str,
-        value: &T,
-        ttl: Duration,
-    ) -> Result<(), Error> {
-        self.cache.set(&self.key(id), value, ttl).await
-    }
-
-    /// Delete a value from cache.
-    pub async fn delete(&self, id: &str) -> Result<(), Error> {
-        self.cache.delete(&self.key(id)).await
-    }
-
-    /// Check if a key exists in cache.
-    pub async fn exists(&self, id: &str) -> Result<bool, Error> {
-        self.cache.exists(&self.key(id)).await
-    }
-
-    /// Get or compute a value.
-    ///
-    /// If the value is in cache, return it. Otherwise, compute it using
-    /// the provided function and cache the result.
-    pub async fn get_or_set<T, F, Fut>(
-        &self,
-        id: &str,
-        compute: F,
-    ) -> Result<T, Error>
-    where
-        T: Serialize + DeserializeOwned + Send + Sync,
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<T, Error>>,
-    {
-        if let Some(value) = self.get(id).await? {
-            return Ok(value);
+    /// Cache backed by `store`, entries expiring after 5 minutes.
+    pub fn new(store: Arc<dyn CacheStore>) -> Self {
+        Self {
+            store,
+            ttl: Duration::from_secs(300),
         }
-
-        let value = compute().await?;
-        self.set(id, &value).await?;
-        Ok(value)
     }
 
-    /// Invalidate all cache entries with the service prefix.
-    pub async fn invalidate_all(&self) -> Result<(), Error> {
-        self.cache.delete_pattern(&format!("{}:*", self.prefix)).await
+    /// In-process cache.
+    pub fn in_memory() -> Self {
+        Self::new(Arc::new(InMemoryCache::new()))
+    }
+
+    fn key(id: &str) -> String {
+        format!("{{name_snake}}:{id}")
+    }
+
+    /// Cached value for `id`.
+    pub async fn get<T: DeserializeOwned>(&self, id: &str) -> CacheResult<Option<T>> {
+        match self.store.get_json(&Self::key(id)).await? {
+            Some(json) => serde_json::from_str(&json)
+                .map(Some)
+                .map_err(|e| CacheError::Deserialization(e.to_string())),
+            None => Ok(None),
+        }
+    }
+
+    /// Store `value` for `id`.
+    pub async fn set<T: Serialize>(&self, id: &str, value: &T) -> CacheResult<()> {
+        let json =
+            serde_json::to_string(value).map_err(|e| CacheError::Serialization(e.to_string()))?;
+        self.store.set_json(&Self::key(id), json, Some(self.ttl)).await
+    }
+
+    /// Remove the entry for `id`.
+    pub async fn invalidate(&self, id: &str) -> CacheResult<()> {
+        self.store.delete(&Self::key(id)).await
+    }
+}
+
+impl Default for {{name_pascal}}CacheService {
+    fn default() -> Self {
+        Self::in_memory()
     }
 }
 "#;
@@ -4013,50 +4211,15 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-    struct TestData {
-        id: u64,
-        name: String,
-    }
-
-    // Note: These tests require a running cache backend (Redis, etc.)
-    // In a real project, you'd use test containers or mock the cache
 
     #[tokio::test]
-    #[ignore] // Requires running Redis
-    async fn test_set_and_get() {
-        let config = CacheConfig::default();
-        let cache = {{name_pascal}}CacheService::new(config).await.unwrap();
-
-        let data = TestData {
-            id: 1,
-            name: "Test".to_string(),
-        };
-
-        cache.set("test-1", &data).await.unwrap();
-        let retrieved: Option<TestData> = cache.get("test-1").await.unwrap();
-
-        assert_eq!(retrieved, Some(data));
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires running Redis
-    async fn test_delete() {
-        let config = CacheConfig::default();
-        let cache = {{name_pascal}}CacheService::new(config).await.unwrap();
-
-        let data = TestData {
-            id: 1,
-            name: "Test".to_string(),
-        };
-
-        cache.set("test-delete", &data).await.unwrap();
-        cache.delete("test-delete").await.unwrap();
-
-        let retrieved: Option<TestData> = cache.get("test-delete").await.unwrap();
-        assert!(retrieved.is_none());
+    async fn stores_reads_and_invalidates() {
+        let cache = {{name_pascal}}CacheService::in_memory();
+        assert_eq!(cache.get::<String>("1").await.unwrap(), None);
+        cache.set("1", &"value".to_string()).await.unwrap();
+        assert_eq!(cache.get::<String>("1").await.unwrap().as_deref(), Some("value"));
+        cache.invalidate("1").await.unwrap();
+        assert_eq!(cache.get::<String>("1").await.unwrap(), None);
     }
 }
 "#;
@@ -4065,185 +4228,52 @@ mod tests {
 // API CLIENT TEMPLATES
 // =============================================================================
 
-const API_CLIENT_TEMPLATE: &str = r#"//! {{name_pascal}} API client.
+const API_CLIENT_TEMPLATE: &str = r#"//! {{name_pascal}} API client (armature-http-client).
 
-use armature::prelude::*;
-use armature_http_client::{HttpClient, HttpClientConfig};
-use serde::{de::DeserializeOwned, Serialize};
+use armature_http_client::{HttpClient, HttpClientConfig, Result};
+use serde::{Serialize, de::DeserializeOwned};
 use std::time::Duration;
 
-/// {{name_pascal}} API client.
-///
-/// Client for interacting with the {{name_pascal}} external API.
+/// Client for the {{name_pascal}} API. Request paths are relative to the
+/// base URL (absolute URLs are rejected, so requests cannot leave it).
 #[derive(Clone)]
 pub struct {{name_pascal}}Client {
     client: HttpClient,
-    base_url: String,
-    api_key: Option<String>,
 }
 
 impl {{name_pascal}}Client {
-    /// Create a new API client.
-    pub fn new(base_url: impl Into<String>) -> Self {
-        let config = HttpClientConfig::default()
-            .timeout(Duration::from_secs(30))
-            .retry_count(3);
-
+    /// Client for `base_url`, with an optional bearer token.
+    pub fn new(base_url: impl Into<String>, api_key: Option<&str>) -> Self {
+        let mut config = HttpClientConfig::builder()
+            .base_url(base_url)
+            .timeout(Duration::from_secs(30));
+        if let Some(key) = api_key {
+            config = config.default_header("Authorization", format!("Bearer {key}"));
+        }
         Self {
-            client: HttpClient::new(config),
-            base_url: base_url.into(),
-            api_key: None,
+            client: HttpClient::new(config.build()),
         }
     }
 
-    /// Create a client with API key authentication.
-    pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
-        self.api_key = Some(api_key.into());
-        self
+    /// GET `path`, decoding the JSON response.
+    pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        self.client.get(path).send().await?.json()
     }
 
-    /// Build a full URL for an endpoint.
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.base_url.trim_end_matches('/'), path)
+    /// POST a JSON `body` to `path`.
+    pub async fn post<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
+        self.client.post(path).json(body)?.send().await?.json()
     }
 
-    /// Add authentication headers if configured.
-    fn add_auth_headers(&self, headers: &mut Vec<(String, String)>) {
-        if let Some(ref api_key) = self.api_key {
-            headers.push(("Authorization".to_string(), format!("Bearer {}", api_key)));
-        }
+    /// PUT a JSON `body` to `path`.
+    pub async fn put<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
+        self.client.put(path).json(body)?.send().await?.json()
     }
 
-    /// GET request.
-    pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, Error> {
-        let mut headers = vec![];
-        self.add_auth_headers(&mut headers);
-
-        self.client
-            .get(&self.url(path))
-            .headers(headers)
-            .send()
-            .await?
-            .json()
-            .await
-    }
-
-    /// POST request with JSON body.
-    pub async fn post<T: DeserializeOwned, B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> Result<T, Error> {
-        let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
-        self.add_auth_headers(&mut headers);
-
-        self.client
-            .post(&self.url(path))
-            .headers(headers)
-            .json(body)
-            .send()
-            .await?
-            .json()
-            .await
-    }
-
-    /// PUT request with JSON body.
-    pub async fn put<T: DeserializeOwned, B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> Result<T, Error> {
-        let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
-        self.add_auth_headers(&mut headers);
-
-        self.client
-            .put(&self.url(path))
-            .headers(headers)
-            .json(body)
-            .send()
-            .await?
-            .json()
-            .await
-    }
-
-    /// DELETE request.
-    pub async fn delete(&self, path: &str) -> Result<(), Error> {
-        let mut headers = vec![];
-        self.add_auth_headers(&mut headers);
-
-        self.client
-            .delete(&self.url(path))
-            .headers(headers)
-            .send()
-            .await?;
-
+    /// DELETE `path`.
+    pub async fn delete(&self, path: &str) -> Result<()> {
+        self.client.delete(path).send().await?;
         Ok(())
-    }
-
-    /// PATCH request with JSON body.
-    pub async fn patch<T: DeserializeOwned, B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> Result<T, Error> {
-        let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
-        self.add_auth_headers(&mut headers);
-
-        self.client
-            .patch(&self.url(path))
-            .headers(headers)
-            .json(body)
-            .send()
-            .await?
-            .json()
-            .await
-    }
-}
-
-/// Builder for {{name_pascal}}Client.
-pub struct {{name_pascal}}ClientBuilder {
-    base_url: String,
-    api_key: Option<String>,
-    timeout: Duration,
-    retry_count: u32,
-}
-
-impl {{name_pascal}}ClientBuilder {
-    /// Create a new builder.
-    pub fn new(base_url: impl Into<String>) -> Self {
-        Self {
-            base_url: base_url.into(),
-            api_key: None,
-            timeout: Duration::from_secs(30),
-            retry_count: 3,
-        }
-    }
-
-    /// Set the API key.
-    pub fn api_key(mut self, key: impl Into<String>) -> Self {
-        self.api_key = Some(key.into());
-        self
-    }
-
-    /// Set the request timeout.
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
-    /// Set the retry count.
-    pub fn retry_count(mut self, count: u32) -> Self {
-        self.retry_count = count;
-        self
-    }
-
-    /// Build the client.
-    pub fn build(self) -> {{name_pascal}}Client {
-        let mut client = {{name_pascal}}Client::new(self.base_url);
-        if let Some(api_key) = self.api_key {
-            client = client.with_api_key(api_key);
-        }
-        client
     }
 }
 "#;
@@ -4268,8 +4298,7 @@ pub struct ControllerData {
 pub struct ModuleData {
     pub name_pascal: String,
     pub name_snake: String,
-    pub controllers: Vec<String>,
-    pub providers: Vec<String>,
+    /// Comma-separated controller paths, relative to the module.
     pub controller_list: String,
     pub provider_list: String,
 }
@@ -4280,6 +4309,21 @@ pub struct ComponentData {
     pub name_pascal: String,
     pub name_snake: String,
     pub name_kebab: String,
+}
+
+/// Template data for `generate resource` (feature module).
+#[derive(Serialize)]
+pub struct ResourceData {
+    /// Module name, e.g. `Products` / `products`.
+    pub name_pascal: String,
+    pub name_snake: String,
+    /// Route prefix without the leading `/`, e.g. `products`.
+    pub base_path: String,
+    /// Item type, e.g. `Product` / `product`.
+    pub entity_pascal: String,
+    pub entity_snake: String,
+    /// Emit create/update/delete endpoints.
+    pub crud: bool,
 }
 
 /// Template data for project generation.
@@ -4752,7 +4796,7 @@ mod generated_code_shape_tests {
             pub message: String,
             #[serde(skip_serializing_if = "Option::is_none")]
             pub details: Option<serde_json::Value>,
-            pub timestamp: String,
+            pub timestamp: u64,
             pub path: String,
         }
 
@@ -4769,7 +4813,10 @@ mod generated_code_shape_tests {
                 error: "Not Found".to_string(),
                 message: "nope".to_string(),
                 details: None,
-                timestamp: chrono::Utc::now().to_rfc3339(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or_default(),
                 path: req.path_only().to_string(),
             };
 
@@ -4792,6 +4839,65 @@ mod generated_code_shape_tests {
             serde_json::from_slice(&req.body).map_err(|e| format!("Invalid request body: {}", e))
         }
 
+        /// Mirrors `RESOURCE_CONTROLLER_TEMPLATE`'s `parse_id` / `not_found`
+        /// and its body parsing, plus `RESOURCE_CONTROLLER_TEST_TEMPLATE`'s
+        /// request construction and DI container use.
+        pub mod resource {
+            use armature_core::{Container, Error, HttpRequest, HttpResponse};
+            use serde::{Deserialize, Serialize};
+
+            #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+            pub struct Item {
+                pub id: u64,
+                pub name: String,
+            }
+
+            #[derive(Debug, Clone, Deserialize)]
+            pub struct CreateItemDto {
+                pub name: String,
+            }
+
+            #[derive(Clone, Default)]
+            pub struct ItemsService {}
+
+            pub fn parse_id(req: &HttpRequest) -> Result<u64, Error> {
+                req.param("id")
+                    .ok_or_else(|| Error::BadRequest("missing id parameter".to_string()))?
+                    .parse()
+                    .map_err(|_| Error::BadRequest("id must be a positive integer".to_string()))
+            }
+
+            pub fn not_found(id: u64) -> Error {
+                Error::NotFound(format!("item {id} not found"))
+            }
+
+            pub fn create(req: &HttpRequest) -> Result<HttpResponse, Error> {
+                let dto: CreateItemDto = req.json()?;
+                HttpResponse::created().with_json(&Item {
+                    id: 1,
+                    name: dto.name,
+                })
+            }
+
+            pub fn destroy() -> Result<HttpResponse, Error> {
+                Ok(HttpResponse::no_content())
+            }
+
+            pub fn request(method: &str, path: &str, id: Option<&str>) -> HttpRequest {
+                let mut req = HttpRequest::new(method, path.to_string());
+                if let Some(id) = id {
+                    req.push_param("id", id.to_string());
+                }
+                req
+            }
+
+            pub fn container() -> Container {
+                let container = Container::new();
+                container.register(ItemsService::default());
+                container
+            }
+        }
+
         /// Mirrors how the emitted `#[cfg(test)]` blocks build a request.
         pub fn build_request() -> HttpRequest {
             let mut req = HttpRequest::new("POST", "/test?token=shh");
@@ -4799,6 +4905,84 @@ mod generated_code_shape_tests {
             req.set_body(r#"{"name": "test"}"#.as_bytes().to_vec());
             req
         }
+    }
+
+    #[test]
+    fn resource_templates_api_typechecks_and_behaves() {
+        use mirrors::resource::*;
+
+        assert_eq!(parse_id(&request("GET", "/items/7", Some("7"))).unwrap(), 7);
+        assert!(matches!(
+            parse_id(&request("GET", "/items/x", Some("x"))),
+            Err(armature_core::Error::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_id(&request("GET", "/items", None)),
+            Err(armature_core::Error::BadRequest(_))
+        ));
+        assert!(matches!(not_found(1), armature_core::Error::NotFound(_)));
+
+        let mut req = request("POST", "/items", None);
+        req.set_body(b"{\"name\":\"example\"}".to_vec());
+        assert_eq!(create(&req).unwrap().status, 201);
+        req.set_body(b"not json".to_vec());
+        assert!(create(&req).is_err());
+        assert_eq!(destroy().unwrap().status, 204);
+
+        assert!(container().resolve::<ItemsService>().is_ok());
+    }
+
+    #[test]
+    fn resource_templates_render_every_variant() {
+        let registry = TemplateRegistry::new();
+        for crud in [false, true] {
+            let data = ResourceData {
+                name_pascal: "OrderItems".into(),
+                name_snake: "order_items".into(),
+                base_path: "order-items".into(),
+                entity_pascal: "OrderItem".into(),
+                entity_snake: "order_item".into(),
+                crud,
+            };
+            for name in [
+                "resource_controller",
+                "resource_service",
+                "resource_controller_test",
+                "resource_service_test",
+            ] {
+                let out = registry.render(name, &data).unwrap();
+                assert!(!out.contains("{{"), "{name}: unrendered placeholder");
+                assert!(
+                    !out.contains("&quot;") && !out.contains("&#x"),
+                    "{name}: escaped"
+                );
+            }
+            let controller = registry.render("resource_controller", &data).unwrap();
+            assert_eq!(controller.contains("#[post(\"/\")]"), crud);
+            assert!(controller.contains("#[controller(\"/order-items\")]"));
+            assert!(controller.contains("use super::order_items_service::"));
+            let service = registry.render("resource_service", &data).unwrap();
+            assert!(service.contains("pub struct OrderItem {"));
+            assert_eq!(service.contains("CreateOrderItemDto"), crud);
+            let test = registry.render("resource_controller_test", &data).unwrap();
+            assert!(
+                test.contains("use super::super::order_items_controller::OrderItemsController;")
+            );
+        }
+
+        let module = registry
+            .render(
+                "module",
+                &ModuleData {
+                    name_pascal: "Admin".into(),
+                    name_snake: "admin".into(),
+                    controller_list: "users::users_controller::UsersController".into(),
+                    provider_list: "crate::a::b_service::BService".into(),
+                },
+            )
+            .unwrap();
+        assert!(module.contains("controllers: [users::users_controller::UsersController],"));
+        assert!(module.contains("providers: [crate::a::b_service::BService]"));
     }
 
     #[test]
@@ -4877,8 +5061,6 @@ mod generated_code_shape_tests {
             ("PRAX_MODULE_TEMPLATE", PRAX_MODULE_TEMPLATE),
             ("HEALTH_CONTROLLER_TEMPLATE", HEALTH_CONTROLLER_TEMPLATE),
             ("INTEGRATION_TEST_TEMPLATE", INTEGRATION_TEST_TEMPLATE),
-            ("SCHEDULER_TEMPLATE", SCHEDULER_TEMPLATE),
-            ("SCHEDULER_TEST_TEMPLATE", SCHEDULER_TEST_TEMPLATE),
             ("CACHE_SERVICE_TEMPLATE", CACHE_SERVICE_TEMPLATE),
             ("CACHE_SERVICE_TEST_TEMPLATE", CACHE_SERVICE_TEST_TEMPLATE),
             ("API_CLIENT_TEMPLATE", API_CLIENT_TEMPLATE),

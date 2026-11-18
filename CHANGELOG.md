@@ -9,6 +9,34 @@ Earlier changes are recorded in the workspace [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- `armature dev` (built-in watcher) no longer rebuilds in a loop. On Linux, `notify` reports the compiler opening source files as `Access(Open)` events; the watcher only looked at the `.rs` extension (the event kind was dropped by `notify-debouncer-mini`), so each build triggered the next one, killing it before it could finish. Events are now filtered by kind (access and metadata-only events are ignored) and by path, and a change is only acted on when the file content really changed.
+- `armature dev` now builds with `cargo build` and runs the produced binary itself, in its own process group (Job Object on Windows). Restarts and `Ctrl+C`/`SIGTERM`/`SIGHUP` stop the server *and* its descendants, with a grace period before a forced kill; previously only `cargo run` was killed, which could leave the application running and holding its port.
+- Only one build runs at a time; changes made during a build are queued and built once afterwards instead of being lost or starting concurrent builds.
+- A failed build is reported once and not retried until a new change; the previous server keeps running.
+- `Cargo.toml`, `Cargo.lock`, `build.rs`, `.cargo/config.toml`, `armature.toml` and workspace path dependencies are now watched; `target/`, `.git/` and editor temporary files are ignored. `Cargo.lock` writes made by Cargo itself during a build do not trigger another build.
+- `armature generate` wrote files that Rust never compiled: they were not declared anywhere (e.g. `src/services/x.rs` without `mod services;`, modules declared in a `src/mod.rs`, tests in `tests/` directories never declared). Every generated file is now declared up to the crate root, and its test is compiled by `cargo test`.
+- Templates that did not compile once actually included now do: CRUD controller (`no_content()` not wrapped in `Ok`), interceptor (real `Interceptor::intercept` API), exception filter (real `ExceptionFilter::catch` API), middleware (missing `Middleware`/`Next` imports), pipe (there is no `Pipe` trait: inherent `transform`), job (real armature-queue API), event (real armature-events API), cache service (real armature-cache API), API client (real armature-http-client API), repository (missing serde import; the `RepositoryImpl` is the provider), config (missing `name_upper`). `prax-module` no longer emits `#[module_impl]`/`#[provider]`, which do not exist; the Prax templates rely on the code produced by `prax generate` and are not compiled by the CLI's tests. The service template no longer emits an unused import.
+
+### Added
+
+- `armature --verbose dev` explains every filesystem event (accepted or ignored, and why), batch, build and server start/stop.
+- `armature dev --debounce-ms <MS>` and `--no-cargo-watch`.
+- `[dev.watcher]` / `[dev.server]` sections in `armature.toml` (debounce, extra watched/excluded paths, shutdown timeouts). Everything has a default.
+- Arguments after a second `--` are passed to the application (`armature dev -- --release -- --flag`), like `cargo run`.
+- `armature generate` follows the NestJS CLI: the name carries the path (`armature g resource modules/products --crud` → `src/modules/products/{mod.rs, products_controller.rs, products_service.rs, tests/…}`), each element gets its own directory (`--flat` to opt out), elements are registered in the nearest `#[module(...)]` (`--skip-import` to opt out), and `--dry-run`/`-d` and `--no-spec` are supported. Generation is all-or-nothing.
+- New NestJS schematics: `class`, `interface` (trait), `provider`, `decorator` (request extractor), `library` (workspace crate in `libs/`), `sub-app` (application in `apps/`), `application`; NestJS aliases (`co`, `s`, `mo`, `res`, `pr`, `cl`, `itf`, `d`, `f`, `ga`, `gu`, `itc`, `mi`, `pi`, `r`, `lib`, `app`).
+- Generators add what their code needs to `Cargo.toml` (armature features such as `auth`, crates such as `validator`, `async-graphql`, `armature-queue`).
+
+### Changed
+
+- **Breaking** for `armature generate`: files no longer go to per-kind directories (`src/controllers/`, `src/services/`, `src/models/`…) but to the path given in the name, NestJS style (`armature g service users` → `src/users/users_service.rs`). `r` is now the alias of `resolver` (NestJS); `resource` is `res`. `generate scheduler` produces a cron job (same as `job --job-type scheduled`). `generate filter` replaces `generate exception-filter` (kept as an alias).
+
+### Removed
+
+- Dependency on `notify-debouncer-mini`.
+
 ## [0.9.0] - 2026-10-29
 
 ### Changed

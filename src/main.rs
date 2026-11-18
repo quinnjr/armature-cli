@@ -311,93 +311,208 @@ enum DatabaseType {
 
 #[derive(Subcommand)]
 enum GeneratorType {
-    /// Generate a controller
-    #[command(alias = "c")]
-    Controller {
-        /// Controller name (e.g., "users" or "api/users")
+    // ---------------------------------------------------------------------
+    // NestJS schematics
+    // ---------------------------------------------------------------------
+    /// Generate a new application (same as `armature new`)
+    Application {
+        /// Application name
         name: String,
+    },
 
+    /// Generate a class (plain struct): NAME.rs
+    #[command(alias = "cl")]
+    Class {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a configuration struct: NAME_config.rs
+    #[command(alias = "configuration", alias = "cfg")]
+    Config {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a controller: NAME_controller.rs, registered in the nearest module
+    #[command(alias = "co", alias = "c")]
+    Controller {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
         /// Generate CRUD endpoints
         #[arg(long)]
         crud: bool,
 
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
-
-        /// Add authentication guard
+        /// Protect the controller with an AuthGuard
         #[arg(long)]
         auth: bool,
+
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a module
-    #[command(alias = "m")]
-    Module {
-        /// Module name
+    /// Generate a decorator (custom request extractor): NAME_decorator.rs
+    #[command(alias = "d")]
+    Decorator {
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Controllers to include (comma-separated)
-        #[arg(short, long)]
-        controllers: Option<String>,
-
-        /// Providers/services to include (comma-separated)
-        #[arg(short, long)]
-        providers: Option<String>,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate middleware
-    #[command(alias = "mw")]
-    Middleware {
-        /// Middleware name
+    /// Generate an exception filter: NAME_filter.rs
+    #[command(name = "filter", alias = "f", alias = "exception-filter")]
+    ExceptionFilter {
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a guard
+    /// Generate a WebSocket gateway: NAME_gateway.rs
+    #[command(alias = "ga", alias = "websocket", alias = "ws")]
+    Gateway {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a guard: NAME_guard.rs
     #[command(alias = "gu")]
     Guard {
-        /// Guard name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
-
         /// Guard type
         #[arg(long, value_enum, default_value = "custom")]
         guard_type: GuardType,
+
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a service/provider
-    #[command(alias = "s")]
-    Service {
-        /// Service name
+    /// Generate an interceptor: NAME_interceptor.rs
+    #[command(alias = "itc", alias = "in")]
+    Interceptor {
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a complete resource (controller + service + module)
-    #[command(alias = "r")]
+    /// Generate an interface (trait): NAME_interface.rs
+    #[command(alias = "itf", alias = "trait")]
+    Interface {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a library crate in libs/NAME, added to the workspace
+    #[command(alias = "lib")]
+    Library {
+        /// Library name
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate middleware: NAME_middleware.rs
+    #[command(alias = "mi", alias = "mw")]
+    Middleware {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a module: PATH/NAME/mod.rs, imported by the parent module
+    #[command(alias = "mo", alias = "m")]
+    Module {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        /// Existing controllers to include, by path (comma-separated)
+        #[arg(short, long)]
+        controllers: Option<String>,
+
+        /// Existing services to include, by path (comma-separated)
+        #[arg(short, long)]
+        providers: Option<String>,
+
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a validation pipe: NAME_pipe.rs
+    #[command(alias = "pi")]
+    Pipe {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate an injectable provider: NAME_provider.rs, registered in the nearest module
+    #[command(alias = "pr")]
+    Provider {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a GraphQL resolver: NAME_resolver.rs
+    #[command(alias = "r", alias = "graphql", alias = "gql")]
+    Resolver {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a resource: module + controller + service + tests in PATH/NAME/
+    #[command(alias = "res")]
     Resource {
-        /// Resource name (e.g., "users")
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
         /// Generate CRUD endpoints
         #[arg(long)]
         crud: bool,
+
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a database model
-    Model {
-        /// Model name
+    /// Generate a service: NAME_service.rs, registered in the nearest module
+    #[command(alias = "s")]
+    Service {
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
 
+    /// Generate another application of the workspace in apps/NAME
+    #[command(name = "sub-app", alias = "app")]
+    SubApp {
+        /// Application name
+        name: String,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    // ---------------------------------------------------------------------
+    // Armature generators
+    // ---------------------------------------------------------------------
+    /// Generate a data model: NAME_model.rs
+    Model {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
         /// Fields (e.g., "name:string,age:i32,active:bool")
         #[arg(short, long)]
         fields: Option<String>,
@@ -405,182 +520,173 @@ enum GeneratorType {
         /// Generate migration
         #[arg(long)]
         migration: bool,
+
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a job/worker
+    /// Generate a job/worker: NAME_job.rs
     Job {
-        /// Job name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
         /// Job type
         #[arg(long, value_enum, default_value = "async")]
         job_type: JobType,
+
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate an event
+    /// Generate an event handler: NAME_event.rs
     Event {
-        /// Event name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a DTO (Data Transfer Object)
+    /// Generate DTOs: NAME_dto.rs
     Dto {
-        /// DTO name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Fields (e.g., "name:string,email:string")
-        #[arg(short, long)]
-        fields: Option<String>,
-    },
-
-    /// Generate a full CRUD scaffold
-    Scaffold {
-        /// Resource name
-        name: String,
-
         /// Fields (e.g., "title:string,body:text,published:bool")
         #[arg(short, long)]
         fields: Option<String>,
+
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a repository (data access layer)
+    /// Generate entity, repository, DTOs, service and CRUD controller in PATH/NAME/
+    Scaffold {
+        /// Name, with an optional path under src/ (e.g. modules/products)
+        name: String,
+        /// Fields (e.g., "title:string,body:text,published:bool")
+        #[arg(short, long)]
+        fields: Option<String>,
+
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+
+    /// Generate a repository: NAME_repository.rs, registered in the nearest module
     #[command(alias = "repo")]
     Repository {
-        /// Repository name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a WebSocket handler
-    #[command(alias = "ws")]
-    Websocket {
-        /// WebSocket handler name
-        name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
-    },
-
-    /// Generate a GraphQL resolver
-    #[command(alias = "gql")]
-    Graphql {
-        /// Resolver name
-        name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
-    },
-
-    /// Generate an interceptor
-    Interceptor {
-        /// Interceptor name
-        name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
-    },
-
-    /// Generate a validation pipe
-    Pipe {
-        /// Pipe name
-        name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
-    },
-
-    /// Generate an exception filter
-    #[command(alias = "filter")]
-    ExceptionFilter {
-        /// Filter name
-        name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
-    },
-
-    /// Generate a configuration module
-    #[command(alias = "cfg")]
-    Config {
-        /// Config module name
-        name: String,
-    },
-
-    /// Generate a database entity
+    /// Generate a database entity: NAME_entity.rs
     #[command(alias = "ent")]
     Entity {
-        /// Entity name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// ORM type (generic, diesel, seaorm, prax)
+        /// ORM (generic, diesel, seaorm, prax)
         #[arg(long, short, default_value = "generic")]
         orm: String,
+
+        /// Fields (e.g., "name:string,age:i32")
+        #[arg(long)]
+        fields: Option<String>,
+
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a Prax ORM schema file
+    /// Generate a Prax ORM schema (schema.prax at the project root)
     #[command(alias = "praxschema")]
     PraxSchema {
-        /// Model name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a Prax ORM repository
+    /// Generate a Prax ORM repository: NAME_repository.rs
     #[command(alias = "prax-repo")]
     PraxRepository {
-        /// Repository name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a complete Prax ORM module (schema + entity + repository + service)
+    /// Generate a Prax ORM module (schema + entity + repository + service)
     #[command(alias = "prax")]
     PraxModule {
-        /// Module name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a scheduled task
+    /// Generate a scheduled task: NAME_task.rs
     #[command(alias = "task", alias = "cron")]
     Scheduler {
-        /// Task name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a cache service
+    /// Generate a cache service: NAME_cache.rs
     #[command(alias = "cache")]
     CacheService {
-        /// Cache service name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
-
-        /// Skip test file generation
-        #[arg(long)]
-        skip_tests: bool,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate an API client
+    /// Generate an API client: NAME_client.rs
     #[command(alias = "client")]
     ApiClient {
-        /// Client name
+        /// Name, with an optional path under src/ (e.g. modules/products)
         name: String,
+        #[command(flatten)]
+        flags: GenFlags,
     },
 
-    /// Generate a health check controller
-    Health,
+    /// Generate a health check controller (default path: health)
+    Health {
+        /// Name, with an optional path under src/ (default: health)
+        name: Option<String>,
+        #[command(flatten)]
+        flags: GenFlags,
+    },
+}
+
+/// Options shared by every generator (as in the NestJS CLI).
+#[derive(Args, Clone, Copy, Default)]
+struct GenFlags {
+    /// Do not create a directory for the element
+    #[arg(long)]
+    flat: bool,
+
+    /// Do not generate test files
+    #[arg(long, visible_alias = "no-spec")]
+    skip_tests: bool,
+
+    /// Do not register the element in the nearest module
+    #[arg(long)]
+    skip_import: bool,
+
+    /// Report the changes without writing any file
+    #[arg(short = 'd', long)]
+    dry_run: bool,
+}
+
+impl From<GenFlags> for generate::GenOptions {
+    fn from(f: GenFlags) -> Self {
+        Self {
+            flat: f.flat,
+            skip_tests: f.skip_tests,
+            skip_import: f.skip_import,
+            dry_run: f.dry_run,
+        }
+    }
 }
 
 #[derive(Clone, ValueEnum)]
@@ -622,7 +728,17 @@ struct DevArgs {
     #[arg(long)]
     https: bool,
 
-    /// Additional cargo arguments
+    /// Stability window before rebuilding, in milliseconds
+    /// (default: 400, or `debounce_ms` in [package.metadata.armature.dev.watcher])
+    #[arg(long, value_name = "MS")]
+    debounce_ms: Option<u64>,
+
+    /// Use the built-in watcher even when cargo-watch is installed
+    #[arg(long)]
+    no_cargo_watch: bool,
+
+    /// Arguments for `cargo build`; arguments after a second `--` are passed to
+    /// the application (e.g. `armature dev -- --release -- --config dev.toml`)
     #[arg(last = true)]
     cargo_args: Vec<String>,
 }
@@ -1108,17 +1224,18 @@ fn print_banner() {
     println!(
         "{}",
         r#"
-   ╔═══════════════════════════════════════════════════════════════╗
-   ║                                                               ║
-   ║     █████╗ ██████╗ ███╗   ███╗ █████╗ ████████╗██╗   ██╗     ║
-   ║    ██╔══██╗██╔══██╗████╗ ████║██╔══██╗╚══██╔══╝██║   ██║     ║
-   ║    ███████║██████╔╝██╔████╔██║███████║   ██║   ██║   ██║     ║
-   ║    ██╔══██║██╔══██╗██║╚██╔╝██║██╔══██║   ██║   ██║   ██║     ║
-   ║    ██║  ██║██║  ██║██║ ╚═╝ ██║██║  ██║   ██║   ╚██████╔╝     ║
-   ║    ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝      ║
-   ║                                                               ║
-   ╚═══════════════════════════════════════════════════════════════╝"#
-            .bright_cyan()
+            ╔═════════════════════════════════════════════════════════════╗
+            ║                                                             ║
+            ║     █████╗ ██████╗ ███╗   ███╗ █████╗ ████████╗██╗   ██╗    ║
+            ║    ██╔══██╗██╔══██╗████╗ ████║██╔══██╗╚══██╔══╝██║   ██║    ║
+            ║    ███████║██████╔╝██╔████╔██║███████║   ██║   ██║   ██║    ║
+            ║    ██╔══██║██╔══██╗██║╚██╔╝██║██╔══██║   ██║   ██║   ██║    ║
+            ║    ██║  ██║██║  ██║██║ ╚═╝ ██║██║  ██║   ██║   ╚██████╔╝    ║
+            ║    ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝     ║
+            ║                                                             ║
+            ╚═════════════════════════════════════════════════════════════╝
+        "#
+        .bright_cyan()
     );
     println!(
         "     {} {} • {}\n",
@@ -2007,29 +2124,30 @@ async fn main() {
         }
 
         Commands::Generate { generator } => match generator {
+            GeneratorType::Application { name } => generate::application(&name).await,
+            GeneratorType::Class { name, flags } => generate::class(&name, flags.into()).await,
+            GeneratorType::Config { name, flags } => generate::config(&name, flags.into()).await,
             GeneratorType::Controller {
                 name,
                 crud,
-                skip_tests,
                 auth,
-            } => generate::controller(&name, crud, skip_tests, auth).await,
-
-            GeneratorType::Module {
-                name,
-                controllers,
-                providers,
-            } => generate::module(&name, controllers.as_deref(), providers.as_deref()).await,
-
-            GeneratorType::Middleware { name, skip_tests } => {
-                generate::middleware(&name, skip_tests).await
+                flags,
+            } => generate::controller(&name, crud, auth, flags.into()).await,
+            GeneratorType::Decorator { name, flags } => {
+                generate::decorator(&name, flags.into()).await
             }
-
+            GeneratorType::ExceptionFilter { name, flags } => {
+                generate::exception_filter(&name, flags.into()).await
+            }
+            GeneratorType::Gateway { name, flags } => {
+                generate::websocket(&name, flags.into()).await
+            }
             GeneratorType::Guard {
                 name,
-                skip_tests,
                 guard_type,
+                flags,
             } => {
-                let gt = match guard_type {
+                let guard_type_str = match guard_type {
                     GuardType::Custom => "custom",
                     GuardType::Auth => "auth",
                     GuardType::Role => "role",
@@ -2037,99 +2155,124 @@ async fn main() {
                     GuardType::ApiKey => "apikey",
                     GuardType::RateLimit => "ratelimit",
                 };
-                generate::guard(&name, skip_tests, gt).await
+                generate::guard(&name, guard_type_str, flags.into()).await
             }
-
-            GeneratorType::Service { name, skip_tests } => {
-                generate::service(&name, skip_tests).await
+            GeneratorType::Interceptor { name, flags } => {
+                generate::interceptor(&name, flags.into()).await
             }
-
-            GeneratorType::Resource { name, crud } => generate::resource(&name, crud).await,
-
+            GeneratorType::Interface { name, flags } => {
+                generate::interface(&name, flags.into()).await
+            }
+            GeneratorType::Library { name, flags } => generate::library(&name, flags.into()).await,
+            GeneratorType::Middleware { name, flags } => {
+                generate::middleware(&name, flags.into()).await
+            }
+            GeneratorType::Module {
+                name,
+                controllers,
+                providers,
+                flags,
+            } => {
+                generate::module(
+                    &name,
+                    controllers.as_deref(),
+                    providers.as_deref(),
+                    flags.into(),
+                )
+                .await
+            }
+            GeneratorType::Pipe { name, flags } => generate::pipe(&name, flags.into()).await,
+            GeneratorType::Provider { name, flags } => {
+                generate::provider(&name, flags.into()).await
+            }
+            GeneratorType::Resolver { name, flags } => {
+                generate::graphql_resolver(&name, flags.into()).await
+            }
+            GeneratorType::Resource { name, crud, flags } => {
+                generate::resource(&name, crud, flags.into()).await
+            }
+            GeneratorType::Service { name, flags } => generate::service(&name, flags.into()).await,
+            GeneratorType::SubApp { name, flags } => generate::sub_app(&name, flags.into()).await,
             GeneratorType::Model {
                 name,
                 fields,
                 migration,
-            } => generate::model(&name, fields.as_deref(), migration).await,
-
-            GeneratorType::Job { name, job_type } => {
-                let jt = match job_type {
+                flags,
+            } => generate::model(&name, fields.as_deref(), migration, flags.into()).await,
+            GeneratorType::Job {
+                name,
+                job_type,
+                flags,
+            } => {
+                let job_type_str = match job_type {
                     JobType::Async => "async",
                     JobType::Scheduled => "scheduled",
                     JobType::Recurring => "recurring",
                 };
-                generate::job(&name, false, jt).await
+                generate::job(&name, job_type_str, flags.into()).await
             }
-
-            GeneratorType::Event { name } => generate::event_handler(&name, false).await,
-
-            GeneratorType::Dto { name, fields } => generate::dto(&name, fields.as_deref()).await,
-
-            GeneratorType::Scaffold { name, fields } => {
-                // Generate all layers: entity, repository, dto, service, controller
-                info(&format!("Generating full scaffold for: {}", name.cyan()));
-                let fields = fields.as_deref();
-                async {
-                    generate::entity_with_orm(&name, generate::OrmType::Generic, fields).await?;
-                    generate::repository(&name, false).await?;
-                    generate::dto(&name, fields).await?;
-                    generate::service(&name, false).await?;
-                    generate::controller(&name, true, false, false).await
+            GeneratorType::Event { name, flags } => {
+                generate::event_handler(&name, flags.into()).await
+            }
+            GeneratorType::Dto {
+                name,
+                fields,
+                flags,
+            } => generate::dto(&name, fields.as_deref(), flags.into()).await,
+            GeneratorType::Scaffold {
+                name,
+                fields,
+                flags,
+            } => generate::scaffold(&name, fields.as_deref(), flags.into()).await,
+            GeneratorType::Repository { name, flags } => {
+                generate::repository(&name, flags.into()).await
+            }
+            GeneratorType::Entity {
+                name,
+                orm,
+                fields,
+                flags,
+            } => match orm.parse::<generate::OrmType>() {
+                Ok(orm_type) => {
+                    generate::entity_with_orm(&name, orm_type, fields.as_deref(), flags.into())
+                        .await
                 }
-                .await
-            }
-
-            GeneratorType::Repository { name, skip_tests } => {
-                generate::repository(&name, skip_tests).await
-            }
-
-            GeneratorType::Websocket { name, skip_tests } => {
-                generate::websocket(&name, skip_tests).await
-            }
-
-            GeneratorType::Graphql { name, skip_tests } => {
-                generate::graphql_resolver(&name, skip_tests).await
-            }
-
-            GeneratorType::Interceptor { name, skip_tests } => {
-                generate::interceptor(&name, skip_tests).await
-            }
-
-            GeneratorType::Pipe { name, skip_tests } => generate::pipe(&name, skip_tests).await,
-
-            GeneratorType::ExceptionFilter { name, skip_tests } => {
-                generate::exception_filter(&name, skip_tests).await
-            }
-
-            GeneratorType::Config { name } => generate::config(&name).await,
-
-            GeneratorType::Entity { name, orm } => match orm.parse::<generate::OrmType>() {
-                Ok(orm_type) => generate::entity_with_orm(&name, orm_type, None).await,
-                Err(e) => Err(crate::error::CliError::InvalidArgument(e)),
+                Err(e) => Err(CliError::InvalidArgument(e)),
             },
-
-            GeneratorType::PraxSchema { name } => generate::prax_schema(&name).await,
-
-            GeneratorType::PraxRepository { name, skip_tests } => {
-                generate::prax_repository(&name, skip_tests).await
+            GeneratorType::PraxSchema { name, flags } => {
+                generate::prax_schema(&name, flags.into()).await
             }
-
-            GeneratorType::PraxModule { name } => generate::prax_module(&name).await,
-
-            GeneratorType::Scheduler { name, skip_tests } => {
-                generate::scheduler(&name, skip_tests).await
+            GeneratorType::PraxRepository { name, flags } => {
+                generate::prax_repository(&name, flags.into()).await
             }
-
-            GeneratorType::CacheService { name, skip_tests } => {
-                generate::cache_service(&name, skip_tests).await
+            GeneratorType::PraxModule { name, flags } => {
+                generate::prax_module(&name, flags.into()).await
             }
-
-            GeneratorType::ApiClient { name } => generate::api_client(&name).await,
-
-            GeneratorType::Health => generate::health_controller().await,
+            GeneratorType::Scheduler { name, flags } => {
+                generate::scheduler(&name, flags.into()).await
+            }
+            GeneratorType::CacheService { name, flags } => {
+                generate::cache_service(&name, flags.into()).await
+            }
+            GeneratorType::ApiClient { name, flags } => {
+                generate::api_client(&name, flags.into()).await
+            }
+            GeneratorType::Health { name, flags } => {
+                generate::health_controller(name.as_deref(), flags.into()).await
+            }
         },
 
-        Commands::Dev(args) => dev::run(args.port, &args.host, &args.cargo_args).await,
+        Commands::Dev(args) => {
+            dev::run(dev::DevOptions {
+                port: args.port,
+                host: args.host,
+                cargo_args: args.cargo_args,
+                verbose: cli.verbose,
+                debounce_ms: args.debounce_ms,
+                use_cargo_watch: !args.no_cargo_watch,
+            })
+            .await
+        }
 
         Commands::Serve(_) => Err(CliError::Unimplemented("serve".to_string())),
 

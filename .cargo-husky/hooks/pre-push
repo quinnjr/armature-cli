@@ -47,24 +47,31 @@ fi
 echo "✅ All tests passed"
 echo ""
 
-echo "📚 Running doc tests..."
-if ! cargo test --doc; then
-    echo ""
-    echo "❌ Doc tests failed!"
-    echo ""
-    exit 1
+echo "📚 Checking documentation..."
+# Doc tests only exist for library targets (`cargo test --doc` errors with
+# "no library targets found" on a binary-only crate such as this one).
+if cargo metadata --no-deps --format-version 1 \
+    | grep -qE '"kind":\[[^]]*"(lib|rlib|dylib|proc-macro)"'; then
+    if ! cargo test --doc; then
+        echo ""
+        echo "❌ Doc tests failed!"
+        echo ""
+        exit 1
+    fi
+    echo "✅ Doc tests passed"
 fi
-echo "✅ Doc tests passed"
-echo ""
 
-echo "📖 Checking documentation builds..."
-if ! cargo doc --no-deps --quiet; then
+# Strict rustdoc on every documented target: broken intra-doc links,
+# malformed code blocks, invalid HTML, bare URLs… are errors. Private items
+# are included because everything in a binary crate is private.
+if ! RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" \
+    cargo doc --no-deps --document-private-items --quiet; then
     echo ""
-    echo "❌ Documentation build failed!"
+    echo "❌ Documentation check failed! (rustdoc warnings are errors)"
     echo ""
     exit 1
 fi
-echo "✅ Documentation builds successfully"
+echo "✅ Documentation checks passed"
 echo ""
 
 echo "✨ Pre-push checks complete! Safe to push."
